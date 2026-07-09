@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
     context-path: /api
 
@@ -8,14 +8,14 @@ spring:
     name: digital-wallet-api
 
   datasource:
-    url: jdbc:sqlserver://localhost:1433;databaseName=DigitalWalletDB;encrypt=true;trustServerCertificate=true
+    url: ${DATABASE_URL:jdbc:sqlserver://localhost:1433;databaseName=DigitalWalletDB;encrypt=true;trustServerCertificate=true}
     username: ${DB_USERNAME:sa}
     password: ${DB_PASSWORD:YourStrong@Password123}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
     hikari:
       connection-timeout: 30000
-      maximum-pool-size: 10
-      minimum-idle: 5
+      maximum-pool-size: 5
+      minimum-idle: 2
       idle-timeout: 300000
       pool-name: DigitalWalletHikariPool
 
@@ -26,8 +26,7 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.SQLServerDialect
-        format_sql: true
-        use_sql_comments: true
+        format_sql: false
     open-in-view: false
 
   jackson:
@@ -38,29 +37,27 @@ spring:
 # JWT Configuration
 jwt:
   secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
-  expiration: 86400000       # 24 hours in milliseconds
-  refresh-expiration: 604800000  # 7 days in milliseconds
+  expiration: 86400000
+  refresh-expiration: 604800000
 
-# Logging Configuration
+# Logging
 logging:
   level:
     com.digitalwallet: INFO
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
-# Actuator Configuration
+# Actuator
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: always
 
-# CORS Configuration
+# CORS
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
   allowed-methods: GET,POST,PUT,DELETE,PATCH,OPTIONS
