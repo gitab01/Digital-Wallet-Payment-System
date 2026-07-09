@@ -1,22 +1,37 @@
 services:
+  # ── Spring Boot Web Service ───────────────────────────────────────────────
   - type: web
     name: digital-wallet-api
     runtime: docker
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     plan: free
-    region: singapore
-    branch: Backend
     healthCheckPath: /api/actuator/health
     envVars:
+      - key: PORT
+        value: 8080
       - key: SPRING_PROFILES_ACTIVE
         value: prod
-      - key: DB_USERNAME
-        sync: false
-      - key: DB_PASSWORD
-        sync: false
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: digital-wallet-db
+          property: connectionString
+      - key: DB_USERNAME
+        fromDatabase:
+          name: digital-wallet-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: digital-wallet-db
+          property: password
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: CORS_ORIGINS
-        sync: false
+        value: https://digital-wallet-frontend.vercel.app
+
+  # ── PostgreSQL Database ───────────────────────────────────────────────────
+databases:
+  - name: digital-wallet-db
+    plan: free
+    databaseName: digitalwallet
+    user: dwallet
