@@ -1,0 +1,26 @@
+### Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IDE files
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.class
+
+### Logs
+*.log
+logs/
+
+### Environment
+.env
+.env.local
+.env.production
+
+### OS
+.DS_Store
+Thumbs.db
