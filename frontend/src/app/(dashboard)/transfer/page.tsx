@@ -1,92 +1,96 @@
 "use client";
 
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowLeftRight, Info } from "lucide-react";
+import {
+  SendHorizontal, Info, ChevronRight,
+  CheckCircle2, Wallet as WalletIcon,
+} from "lucide-react";
 import { useWallets } from "@/hooks/useWallets";
 import { useTransfer } from "@/hooks/useTransactions";
 import { WalletCard } from "@/components/wallet/WalletCard";
-import { formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import type { Wallet } from "@/types";
-import { useState } from "react";
 
-const transferSchema = z.object({
-  sourceWalletNumber: z.string().min(1, "Select a source wallet"),
-  destinationWalletNumber: z
-    .string()
-    .min(1, "Destination wallet number is required"),
-  amount: z.coerce
-    .number()
-    .positive("Amount must be greater than 0")
-    .max(1_000_000, "Maximum transfer is 1,000,000"),
+const schema = z.object({
+  sourceWalletNumber:      z.string().min(1, "Select a source wallet"),
+  destinationWalletNumber: z.string().min(1, "Destination wallet number is required"),
+  amount: z.coerce.number().positive("Must be greater than 0").max(1_000_000),
   description: z.string().max(500).optional(),
 });
-
-type TransferFormValues = z.infer<typeof transferSchema>;
+type Values = z.infer<typeof schema>;
 
 export default function TransferPage() {
   const { data: wallets = [] } = useWallets();
   const transfer = useTransfer();
-  const [selectedSource, setSelectedSource] = useState<Wallet | null>(null);
+  const [source, setSource] = useState<Wallet | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    setValue,
-    reset,
-    watch,
-    formState: { errors, isSubmitting },
-  } = useForm<TransferFormValues>({
-    resolver: zodResolver(transferSchema),
-  });
+  const { register, handleSubmit, setValue, reset, watch, formState: { errors, isSubmitting } } =
+    useForm<Values>({ resolver: zodResolver(schema) });
 
   const amount = watch("amount");
-  const estimatedFee = amount ? Number(amount) * 0.005 : 0;
+  const fee    = amount > 0 ? Number(amount) * 0.005 : 0;
+  const total  = amount > 0 ? Number(amount) + fee : 0;
 
-  const onSubmit = async (data: TransferFormValues) => {
+  const onSubmit = async (data: Values) => {
     await transfer.mutateAsync(data);
     reset();
-    setSelectedSource(null);
+    setSource(null);
   };
 
-  const handleSelectSource = (wallet: Wallet) => {
-    setSelectedSource(wallet);
-    setValue("sourceWalletNumber", wallet.walletNumber);
+  const selectWallet = (w: Wallet) => {
+    setSource(w);
+    setValue("sourceWalletNumber", w.walletNumber);
   };
+
+  const active = wallets.filter((w) => w.status === "ACTIVE");
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-8 animate-fade-in">
+      {/* ── Header ── */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Send Money</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Transfer funds to any wallet instantly
-        </p>
+        <h1 className="page-title">Send Money</h1>
+        <p className="page-subtitle">Instant peer-to-peer wallet transfer</p>
       </div>
 
-      {/* Source wallet selection */}
+      {/* ── Step 1: Source wallet ── */}
       <div className="card space-y-4">
-        <h2 className="font-semibold text-gray-800">Select Source Wallet</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {wallets
-            .filter((w) => w.status === "ACTIVE")
-            .map((wallet) => (
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">1</span>
+          <h2 className="font-semibold text-surface-800">Choose source wallet</h2>
+        </div>
+
+        {active.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 rounded-2xl bg-surface-50 py-8 text-center">
+            <WalletIcon className="h-8 w-8 text-surface-300" />
+            <p className="text-sm text-surface-500">No active wallets. Create one first.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {active.map((w) => (
               <WalletCard
-                key={wallet.id}
-                wallet={wallet}
-                onClick={() => handleSelectSource(wallet)}
-                selected={selectedSource?.id === wallet.id}
+                key={w.id}
+                wallet={w}
+                onClick={() => selectWallet(w)}
+                selected={source?.id === w.id}
               />
             ))}
-        </div>
+          </div>
+        )}
+
         {errors.sourceWalletNumber && (
-          <p className="error-message">{errors.sourceWalletNumber.message}</p>
+          <p className="error-msg">{errors.sourceWalletNumber.message}</p>
         )}
       </div>
 
-      {/* Transfer form */}
+      {/* ── Step 2: Transfer details ── */}
       <form onSubmit={handleSubmit(onSubmit)} className="card space-y-5">
-        <h2 className="font-semibold text-gray-800">Transfer Details</h2>
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">2</span>
+          <h2 className="font-semibold text-surface-800">Transfer details</h2>
+        </div>
 
         <input type="hidden" {...register("sourceWalletNumber")} />
 
@@ -96,87 +100,98 @@ export default function TransferPage() {
           <input
             type="text"
             placeholder="WLT0000000000000"
-            className="input-field mt-1 font-mono"
+            className={cn("input font-mono tracking-wider", errors.destinationWalletNumber && "input-error")}
             {...register("destinationWalletNumber")}
           />
-          {errors.destinationWalletNumber && (
-            <p className="error-message">
-              {errors.destinationWalletNumber.message}
-            </p>
-          )}
+          {errors.destinationWalletNumber && <p className="error-msg">{errors.destinationWalletNumber.message}</p>}
         </div>
 
         {/* Amount */}
         <div>
           <label className="label">
             Amount
-            {selectedSource && (
-              <span className="ml-2 text-gray-400">
-                (Available:{" "}
-                {formatCurrency(
-                  selectedSource.availableBalance,
-                  selectedSource.currencyCode
-                )}
-                )
+            {source && (
+              <span className="ml-2 normal-case font-normal text-surface-400">
+                · Available: {formatCurrency(source.availableBalance, source.currencyCode)}
               </span>
             )}
           </label>
-          <div className="relative mt-1">
+          <div className="relative">
+            {source && (
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-surface-500">
+                {source.currencyCode}
+              </span>
+            )}
             <input
               type="number"
               step="0.01"
               min="0.01"
               placeholder="0.00"
-              className="input-field pr-16"
+              className={cn(
+                "input text-right text-lg font-bold tabular-nums",
+                source ? "pl-14" : "",
+                errors.amount && "input-error"
+              )}
               {...register("amount")}
             />
-            {selectedSource && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500">
-                {selectedSource.currencyCode}
-              </span>
-            )}
           </div>
-          {errors.amount && (
-            <p className="error-message">{errors.amount.message}</p>
-          )}
+          {errors.amount && <p className="error-msg">{errors.amount.message}</p>}
         </div>
 
-        {/* Description */}
+        {/* Note */}
         <div>
-          <label className="label">
-            Note{" "}
-            <span className="text-gray-400">(optional)</span>
-          </label>
+          <label className="label">Note <span className="normal-case font-normal text-surface-400">(optional)</span></label>
           <input
             type="text"
-            placeholder="What is this transfer for?"
-            className="input-field mt-1"
+            placeholder="What's this for?"
+            className="input"
             {...register("description")}
           />
         </div>
 
-        {/* Fee summary */}
+        {/* Fee breakdown */}
         {amount > 0 && (
-          <div className="flex items-start gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              Cross-currency fee (0.5%):{" "}
-              <strong>
-                {formatCurrency(estimatedFee, selectedSource?.currencyCode ?? "USD")}
-              </strong>
-            </span>
+          <div className="rounded-2xl border border-brand-100 bg-brand-50 p-4 space-y-2 animate-fade-in">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-500">
+              <Info className="h-3.5 w-3.5" /> Transfer breakdown
+            </div>
+            <div className="space-y-1.5 text-sm">
+              <Row label="Amount" value={formatCurrency(Number(amount), source?.currencyCode ?? "USD")} />
+              <Row label="Fee (0.5%)" value={formatCurrency(fee, source?.currencyCode ?? "USD")} />
+              <div className="my-1 h-px bg-brand-200/50" />
+              <Row label="Total" value={formatCurrency(total, source?.currencyCode ?? "USD")} bold />
+            </div>
           </div>
         )}
 
         <button
           type="submit"
-          disabled={isSubmitting || transfer.isPending || !selectedSource}
-          className="btn-primary w-full"
+          disabled={isSubmitting || transfer.isPending || !source}
+          className="btn-primary w-full py-3 text-[15px]"
         >
-          <ArrowLeftRight className="h-4 w-4" />
-          {transfer.isPending ? "Processing…" : "Send Money"}
+          {transfer.isPending ? (
+            <span className="flex items-center gap-2">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              Processing…
+            </span>
+          ) : (
+            <>
+              <SendHorizontal className="h-4 w-4" />
+              Send {amount > 0 ? formatCurrency(Number(amount), source?.currencyCode ?? "USD") : ""}
+              <ChevronRight className="h-4 w-4" />
+            </>
+          )}
         </button>
       </form>
+    </div>
+  );
+}
+
+function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className={cn("text-surface-500", bold && "font-semibold text-surface-700")}>{label}</span>
+      <span className={cn("text-surface-800 tabular-nums", bold && "font-bold text-brand-700")}>{value}</span>
     </div>
   );
 }

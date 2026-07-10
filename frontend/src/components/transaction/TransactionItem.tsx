@@ -3,83 +3,99 @@
 import {
   ArrowUpRight,
   ArrowDownLeft,
-  RefreshCw,
-  PlusCircle,
-  MinusCircle,
-  Receipt,
+  RotateCcw,
+  CirclePlus,
+  CircleMinus,
+  CreditCard,
+  Banknote,
 } from "lucide-react";
 import { cn, formatCurrency, formatDateTime, getStatusColor } from "@/lib/utils";
 import type { Transaction } from "@/types";
 
-interface TransactionItemProps {
+interface Props {
   transaction: Transaction;
-  currentUserId?: number;
 }
 
-const TYPE_CONFIG = {
-  TRANSFER: { icon: ArrowUpRight, label: "Transfer", color: "text-blue-600" },
-  DEPOSIT: { icon: PlusCircle, label: "Deposit", color: "text-green-600" },
-  WITHDRAWAL: { icon: MinusCircle, label: "Withdrawal", color: "text-red-600" },
-  PAYMENT: { icon: ArrowDownLeft, label: "Payment", color: "text-purple-600" },
-  REFUND: { icon: RefreshCw, label: "Refund", color: "text-teal-600" },
-  FEE: { icon: Receipt, label: "Fee", color: "text-orange-600" },
+const TYPE_CFG = {
+  TRANSFER:   { icon: ArrowUpRight,  label: "Transfer",   iconBg: "bg-violet-50",   iconColor: "text-violet-600" },
+  DEPOSIT:    { icon: CirclePlus,    label: "Deposit",    iconBg: "bg-emerald-50",  iconColor: "text-emerald-600" },
+  WITHDRAWAL: { icon: CircleMinus,   label: "Withdrawal", iconBg: "bg-rose-50",     iconColor: "text-rose-600" },
+  PAYMENT:    { icon: CreditCard,    label: "Payment",    iconBg: "bg-sky-50",      iconColor: "text-sky-600" },
+  REFUND:     { icon: RotateCcw,     label: "Refund",     iconBg: "bg-teal-50",     iconColor: "text-teal-600" },
+  FEE:        { icon: Banknote,      label: "Fee",        iconBg: "bg-amber-50",    iconColor: "text-amber-600" },
+} as const;
+
+const STATUS_STYLES: Record<string, string> = {
+  COMPLETED:  "badge-success",
+  PENDING:    "badge-warning",
+  PROCESSING: "badge-info",
+  FAILED:     "badge-error",
+  CANCELLED:  "badge-neutral",
+  REVERSED:   "badge-purple",
 };
 
-export function TransactionItem({ transaction }: TransactionItemProps) {
-  const config = TYPE_CONFIG[transaction.type] ?? TYPE_CONFIG.TRANSFER;
-  const Icon = config.icon;
-  const statusColor = getStatusColor(transaction.status);
-  const isCredit = !transaction.sourceWalletNumber;
+export function TransactionItem({ transaction }: Props) {
+  const cfg   = TYPE_CFG[transaction.type] ?? TYPE_CFG.TRANSFER;
+  const Icon  = cfg.icon;
+  const isCredit   = transaction.type === "DEPOSIT" || transaction.type === "REFUND";
+  const badgeClass = STATUS_STYLES[transaction.status] ?? "badge-neutral";
 
   return (
-    <div className="flex items-center gap-4 rounded-xl border border-gray-100 bg-white px-4 py-3.5 shadow-sm transition-shadow hover:shadow-md">
-      {/* Icon */}
+    <div className="group flex items-center gap-4 rounded-2xl border border-surface-100 bg-white px-4 py-3.5 shadow-card transition-all duration-150 hover:border-surface-200 hover:shadow-card-md">
+
+      {/* ── Icon ── */}
       <div
         className={cn(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
-          isCredit ? "bg-green-50" : "bg-gray-50"
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition-transform duration-150 group-hover:scale-105",
+          cfg.iconBg
         )}
       >
-        <Icon className={cn("h-5 w-5", isCredit ? "text-green-600" : config.color)} />
+        <Icon className={cn("h-5 w-5", cfg.iconColor)} strokeWidth={2} />
       </div>
 
-      {/* Details */}
+      {/* ── Details ── */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between">
-          <p className="truncate text-sm font-semibold text-gray-900">
-            {transaction.description || config.label}
+        <div className="flex items-center gap-2">
+          <p className="truncate text-[13.5px] font-semibold text-surface-800">
+            {transaction.description || cfg.label}
           </p>
-          <span
-            className={cn(
-              "ml-2 rounded-full px-2 py-0.5 text-xs font-medium",
-              statusColor.bg,
-              statusColor.text
-            )}
-          >
-            {transaction.status}
-          </span>
+          <span className={badgeClass}>{transaction.status}</span>
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-gray-400">
-          <span className="font-mono">{transaction.referenceNumber}</span>
-          <span>·</span>
+
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-surface-400">
+          <span className="font-mono text-[11px]">{transaction.referenceNumber}</span>
+          <span className="text-surface-300">·</span>
           <span>{formatDateTime(transaction.createdAt)}</span>
+
+          {/* Wallets */}
+          {transaction.sourceWalletNumber && (
+            <>
+              <span className="text-surface-300">·</span>
+              <span className="hidden sm:inline font-mono text-[11px]">
+                {transaction.sourceWalletNumber.slice(-6)}
+                {transaction.destinationWalletNumber && (
+                  <> → {transaction.destinationWalletNumber.slice(-6)}</>
+                )}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Amount */}
+      {/* ── Amount ── */}
       <div className="shrink-0 text-right">
         <p
           className={cn(
-            "text-sm font-bold",
-            isCredit ? "text-green-600" : "text-gray-900"
+            "text-[14px] font-bold tabular-nums",
+            isCredit ? "text-emerald-600" : "text-surface-800"
           )}
         >
-          {isCredit ? "+" : "-"}
+          {isCredit ? "+" : "−"}
           {formatCurrency(transaction.amount, transaction.sourceCurrencyCode)}
         </p>
         {transaction.fee > 0 && (
-          <p className="text-xs text-gray-400">
-            Fee: {formatCurrency(transaction.fee, transaction.sourceCurrencyCode)}
+          <p className="mt-0.5 text-[11px] text-surface-400">
+            fee {formatCurrency(transaction.fee, transaction.sourceCurrencyCode)}
           </p>
         )}
       </div>

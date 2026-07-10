@@ -1,19 +1,29 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
-    default: "Digital Wallet",
-    template: "%s | Digital Wallet",
+    default: "PayVault — Digital Wallet",
+    template: "%s · PayVault",
   },
   description:
-    "Secure digital wallet platform with multi-currency support and real-time balance updates.",
-  keywords: ["digital wallet", "payment system", "money transfer", "fintech"],
+    "Enterprise-grade digital wallet with multi-currency support, real-time balance updates and instant peer-to-peer transfers.",
+  keywords: ["digital wallet", "payment system", "fintech", "money transfer"],
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#4f46e5",
 };
 
 export default function RootLayout({
@@ -23,16 +33,30 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans bg-gray-50 text-gray-900 antialiased">
+      <body className="font-sans bg-surface-50 text-surface-900 antialiased">
         <Providers>
           {children}
+
           <Toaster
             position="top-right"
+            gutter={10}
             toastOptions={{
               duration: 4000,
-              style: { fontSize: "14px" },
-              success: { iconTheme: { primary: "#16a34a", secondary: "#fff" } },
-              error: { iconTheme: { primary: "#dc2626", secondary: "#fff" } },
+              style: {
+                borderRadius: "14px",
+                padding: "12px 16px",
+                fontSize: "13.5px",
+                fontWeight: "500",
+                boxShadow:
+                  "0 10px 30px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.06)",
+                border: "1px solid rgba(0,0,0,.06)",
+              },
+              success: {
+                iconTheme: { primary: "#10b981", secondary: "#fff" },
+              },
+              error: {
+                iconTheme: { primary: "#ef4444", secondary: "#fff" },
+              },
             }}
           />
         </Providers>
