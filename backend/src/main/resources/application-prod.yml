@@ -1,14 +1,14 @@
 spring:
   datasource:
     url: ${DATABASE_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 3
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     show-sql: false
 
 logging:
   level:
-    com.digitalwallet: WARN
-    root: ERROR
+    root: WARN
+    com.digitalwallet: INFO

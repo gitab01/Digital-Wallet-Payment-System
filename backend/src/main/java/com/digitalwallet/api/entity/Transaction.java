@@ -71,7 +71,7 @@ public class Transaction {
     @Column(name = "description", length = 500)
     private String description;
 
-    @Column(name = "metadata", columnDefinition = "NVARCHAR(MAX)")
+    @Column(name = "metadata", columnDefinition = "TEXT")
     private String metadata;
 
     @Column(name = "failure_reason", length = 500)
