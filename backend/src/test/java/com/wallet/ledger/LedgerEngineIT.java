@@ -131,6 +131,41 @@ class LedgerEngineIT {
         assertEveryTransferBalances();
     }
 
+    @Test
+    @DisplayName("every leg records the balance the leg before it actually left")
+    void legsChainUnderConcurrency() throws Exception {
+        fund(alice, "6000.00");
+        fund(bob, "6000.00");
+        long feeAccount = accounts.findByKindAndCurrency(Account.Kind.FEE_REVENUE, "ETB")
+                .orElseThrow().getId();
+        long aliceWallet = wallet(alice, "ETB").getId();
+        long bobWallet = wallet(bob, "ETB").getId();
+
+        // Reciprocal transfers over one shared pool. The fee row is touched by every
+        // movement and deliberately never locked; the two wallets are read after an
+        // UPDLOCK statement, and a lock that hands back the balance read before it was
+        // granted is exactly as wrong as never locking at all.
+        List<Callable<Void>> work = new ArrayList<>();
+        for (int i = 0; i < 18; i++) {
+            final int n = i;
+            work.add(() -> {
+                User sender = n % 2 == 0 ? alice : bob;
+                User payee = n % 2 == 0 ? bob : alice;
+                transfers.transfer(sender.getId(), payee.getEmail(), "ETB",
+                        Money.toCents("37.00"), PIN, "chained-" + n + "-" + UUID.randomUUID());
+                return null;
+            });
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(6);
+        pool.invokeAll(work);
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(120, TimeUnit.SECONDS), "the pool did not finish");
+
+        assertLegsChain(feeAccount);
+        assertLegsChain(aliceWallet);
+        assertLegsChain(bobWallet);
+    }
+
     // ------------------------------------------------------------ idempotency
 
     @Test
@@ -347,6 +382,29 @@ class LedgerEngineIT {
                 "SELECT COUNT(*) FROM (SELECT transfer_id FROM ledger_entries GROUP BY transfer_id "
                         + "HAVING COUNT(*) < 2) bad", Integer.class);
         assertEquals(0, lonely, "a single leg is not a transfer");
+    }
+
+    /**
+     * The property conservation cannot see. Conservation only ever sums amounts, so a leg
+     * that books the wrong running balance keeps the ledger perfectly balanced and passes
+     * every other check here. Entries are inserted after the account's row is serialised,
+     * so id order is the order the balances were produced in.
+     */
+    private void assertLegsChain(Long accountId) {
+        List<long[]> legs = jdbc.query("""
+                SELECT amount_cents, balance_after_cents FROM ledger_entries
+                 WHERE account_id = ? ORDER BY id
+                """, (rs, i) -> new long[] { rs.getLong(1), rs.getLong(2) }, accountId);
+        assertTrue(legs.size() > 1, "account " + accountId + " booked " + legs.size()
+                + " entries, so the chain check proved nothing");
+
+        for (int i = 1; i < legs.size(); i++) {
+            assertEquals(legs.get(i - 1)[1] + legs.get(i)[0], legs.get(i)[1],
+                    "entry " + i + " on account " + accountId
+                            + " does not continue from the balance the entry before it left");
+        }
+        assertEquals(legs.get(legs.size() - 1)[1], accounts.balanceCentsOf(accountId),
+                "account " + accountId + "'s last recorded balance is not the balance it now holds");
     }
 
     private static SQLException sqlIn(Throwable ex) {

@@ -29,12 +29,17 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
      * free to take the rows in whatever order the index it chose returns them and sort
      * afterwards — so the ascending-id discipline can only be guaranteed by the caller
      * issuing one statement per id, smallest first.
+     *
+     * It returns the id and not the account: an entity result would be satisfied from
+     * the persistence context, which often already holds this row from an earlier
+     * unlocked lookup, and the caller would get the balance as it was before the lock
+     * was granted. Lock here, then read the money with balanceCentsOf.
      */
     @Query(value = """
-            SELECT * FROM accounts WITH (UPDLOCK, ROWLOCK)
+            SELECT id FROM accounts WITH (UPDLOCK, ROWLOCK)
             WHERE id = :id
             """, nativeQuery = true)
-    Optional<Account> lockForUpdate(@Param("id") Long id);
+    Optional<Long> lockForUpdate(@Param("id") Long id);
 
     /**
      * Maintains the projection with one atomic statement rather than a read-modify-
@@ -53,6 +58,14 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     int applyProjection(@Param("id") Long id,
                         @Param("delta") long delta,
                         @Param("at") java.time.Instant at);
+
+    /**
+     * The balance straight off the row. This has to be a scalar native query and not
+     * findById: after applyProjection the persistence context still holds the pre-update
+     * entity, so an entity read would return the balance from before the increment.
+     */
+    @Query(value = "SELECT balance_cents FROM accounts WHERE id = :id", nativeQuery = true)
+    Long balanceCentsOf(@Param("id") Long id);
 
     /** Reconciliation: the ledger's own verdict on what an account is worth. */
     @Query(value = """

@@ -121,9 +121,10 @@ public class TransferService {
             requireNotFrozen(sender);
 
             // Deterministic acquisition order is the deadlock fix, not an optimisation.
-            List<Account> locked = lockAccounts(List.of(from.getId(), to.getId()));
+            lockAccounts(List.of(from.getId(), to.getId()));
+            long fromStart = lockedBalance(from.getId());
             long totalDebit = amountCents + feeFor(currency, amountCents);
-            assertSufficient(locked, from.getId(), totalDebit);
+            assertSufficient(from.getId(), totalDebit);
             assertWithinLimits(sender, currency, totalDebit);
 
             String existing = existingIdempotentResult(sender.getId(), idempotencyKey);
@@ -145,9 +146,7 @@ public class TransferService {
             transfers.saveAndFlush(transfer);
 
             long fee = transfer.getFeeCents();
-            long fromStart = balanceOf(locked, from.getId());
-            long toStart = balanceOf(locked, to.getId());
-            long feeStart = feeAccount == null ? 0 : readBalance(feeAccount.getId());
+            long toStart = lockedBalance(to.getId());
 
             List<LedgerService.Leg> legs = new ArrayList<>();
             legs.add(new LedgerService.Leg(from.getId(), -amountCents, LedgerEntry.Role.FROM, currency,
@@ -160,14 +159,11 @@ public class TransferService {
                 legs.add(new LedgerService.Leg(from.getId(), -fee, LedgerEntry.Role.FEE, currency,
                         fromStart - amountCents - fee));
                 legs.add(new LedgerService.Leg(feeAccount.getId(), fee, LedgerEntry.Role.FEE_REVENUE, currency,
-                        feeStart + fee));
+                        bumpShared(feeAccount.getId(), fee)));
             }
             ledger.post(transfer.getId(), legs);
 
-            applyProjections(Map.of(
-                    from.getId(), -amountCents - fee,
-                    to.getId(), amountCents,
-                    feeAccount == null ? 0L : feeAccount.getId(), feeAccount == null ? 0L : fee));
+            applyProjections(Map.of(from.getId(), -amountCents - fee, to.getId(), amountCents));
 
             complete(transfer);
 
@@ -216,16 +212,16 @@ public class TransferService {
             transfer.setToAccountId(wallet.getId());
             transfers.saveAndFlush(transfer);
 
-            long start = wallet.getBalanceCents();
+            long start = lockedBalance(wallet.getId());
             ledger.post(transfer.getId(), List.of(
                     new LedgerService.Leg(wallet.getId(), amountCents, LedgerEntry.Role.CASH_IN, currency,
                             start + amountCents),
                     // The provider is funded from outside the system; its projection runs
                     // negative by design, which is what makes the credit above real.
                     new LedgerService.Leg(provider.getId(), -amountCents, LedgerEntry.Role.CASH_IN, currency,
-                            readBalance(provider.getId()) - amountCents)));
+                            bumpShared(provider.getId(), -amountCents))));
 
-            applyProjections(Map.of(wallet.getId(), amountCents, provider.getId(), -amountCents));
+            applyProjections(Map.of(wallet.getId(), amountCents));
             complete(transfer);
 
             Instant at = Instant.now();
@@ -257,10 +253,10 @@ public class TransferService {
 
             Account wallet = requireWallet(userId, currency);
             Account provider = requireSystemAccount(Account.Kind.CASH_IN_PROVIDER, currency);
-            List<Account> locked = lockAccounts(List.of(wallet.getId()));
+            lockAccounts(List.of(wallet.getId()));
 
             long totalDebit = amountCents + feeFor(currency, amountCents);
-            assertSufficient(locked, wallet.getId(), totalDebit);
+            assertSufficient(wallet.getId(), totalDebit);
             assertWithinLimits(user, currency, totalDebit);
 
             if (existingIdempotentResult(userId, key) != null) {
@@ -275,23 +271,21 @@ public class TransferService {
             if (feeAccount != null) transfer.setFeeAccountId(feeAccount.getId());
             transfers.saveAndFlush(transfer);
 
-            long start = balanceOf(locked, wallet.getId());
+            long start = lockedBalance(wallet.getId());
             List<LedgerService.Leg> legs = new ArrayList<>();
             legs.add(new LedgerService.Leg(wallet.getId(), -totalDebit, LedgerEntry.Role.FROM, currency,
                     start - totalDebit));
+            // Both shared accounts are advanced in this fixed order, so no two
+            // withdrawals can hold them the other way round.
             legs.add(new LedgerService.Leg(provider.getId(), amountCents, LedgerEntry.Role.CASH_OUT, currency,
-                    readBalance(provider.getId()) + amountCents));
+                    bumpShared(provider.getId(), amountCents)));
             if (fee > 0) {
                 legs.add(new LedgerService.Leg(feeAccount.getId(), fee, LedgerEntry.Role.FEE_REVENUE, currency,
-                        readBalance(feeAccount.getId()) + fee));
+                        bumpShared(feeAccount.getId(), fee)));
             }
             ledger.post(transfer.getId(), legs);
 
-            Map<Long, Long> deltas = new java.util.HashMap<>();
-            deltas.put(wallet.getId(), -totalDebit);
-            deltas.put(provider.getId(), amountCents);
-            if (fee > 0) deltas.put(feeAccount.getId(), fee);
-            applyProjections(deltas);
+            applyProjections(Map.of(wallet.getId(), -totalDebit));
 
             complete(transfer);
 
@@ -401,9 +395,9 @@ public class TransferService {
      * system — and a set-based query could not honour it anyway, since SQL Server does
      * not tie lock order to ORDER BY.
      */
-    private List<Account> lockAccounts(List<Long> ids) {
+    private List<Long> lockAccounts(List<Long> ids) {
         List<Long> ordered = ids.stream().distinct().sorted(Comparator.naturalOrder()).toList();
-        List<Account> locked = ordered.stream()
+        List<Long> locked = ordered.stream()
                 .map(id -> accounts.lockForUpdate(id).orElse(null))
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -412,6 +406,44 @@ public class TransferService {
                     "A wallet involved in this transfer no longer exists.");
         }
         return locked;
+    }
+
+    /**
+     * The balance of an account this transaction has just locked. Read off the row, not
+     * from the Account entity: the persistence context still holds whatever it loaded
+     * before the lock was granted, and a lock that hands back that older number is as
+     * wrong as never locking.
+     */
+    private long lockedBalance(Long accountId) {
+        Long cents = accounts.balanceCentsOf(accountId);
+        if (cents == null) {
+            throw ApiException.of(HttpStatus.CONFLICT, "ACCOUNT_NOT_FOUND",
+                    "Wallet " + accountId + " no longer exists.");
+        }
+        return cents;
+    }
+
+    /**
+     * Advance one unlocked shared account and return the balance its leg should record.
+     *
+     * System accounts are deliberately never locked, because every transfer in the
+     * system touches the same few of them. That means a leg cannot compute its running
+     * balance by reading the account first and adding afterwards: two movements through
+     * the same row both read the same starting balance, and the second books a balance
+     * that never existed. The atomic increment takes the row's write lock and keeps it
+     * until commit, so the balance read back after it is the one this movement produced.
+     */
+    private long bumpShared(Long accountId, long delta) {
+        if (accounts.applyProjection(accountId, delta, Instant.now()) != 1) {
+            throw ApiException.of(HttpStatus.CONFLICT, "ACCOUNT_NOT_FOUND",
+                    "Wallet " + accountId + " could not be updated.");
+        }
+        Long after = accounts.balanceCentsOf(accountId);
+        if (after == null) {
+            throw ApiException.of(HttpStatus.CONFLICT, "ACCOUNT_NOT_FOUND",
+                    "Wallet " + accountId + " no longer exists.");
+        }
+        return after;
     }
 
     private void applyProjections(Map<Long, Long> deltas) {
@@ -478,7 +510,8 @@ public class TransferService {
     }
 
     private long balanceOfWallet(Long userId, Transfer original) {
-        return findWallet(userId, original.getCurrency()).map(Account::getBalanceCents).orElse(0L);
+        return findWallet(userId, original.getCurrency())
+                .map(a -> accounts.balanceCentsOf(a.getId())).orElse(0L);
     }
 
     private String counterpartyName(Transfer original, Long viewerId) {
@@ -532,8 +565,8 @@ public class TransferService {
                         "The platform account for " + kind + " " + currency + " is missing."));
     }
 
-    private void assertSufficient(List<Account> locked, Long walletId, long totalDebitCents) {
-        long balance = balanceOf(locked, walletId);
+    private void assertSufficient(Long walletId, long totalDebitCents) {
+        long balance = lockedBalance(walletId);
         if (balance < totalDebitCents) {
             throw ApiException.insufficientFunds(totalDebitCents, balance);
         }
@@ -548,24 +581,6 @@ public class TransferService {
                     ex.getCode() + " " + currency + " requested=" + totalDebitCents);
             throw ex;
         }
-    }
-
-    private static long balanceOf(List<Account> locked, Long id) {
-        return locked.stream().filter(a -> a.getId().equals(id)).findFirst()
-                .map(Account::getBalanceCents)
-                .orElseThrow(() -> ApiException.of(HttpStatus.CONFLICT, "ACCOUNT_NOT_FOUND",
-                        "Wallet " + id + " was not locked."));
-    }
-
-    /**
-     * System accounts are not locked: they are a single shared row, and locking them
-     * would serialise every transfer in the system through one row. Their projection
-     * is maintained by an atomic increment instead. The running balance recorded on
-     * one of their legs is therefore approximate under concurrency; the account's
-     * true value is the sum of its entries, which is exact.
-     */
-    private long readBalance(Long accountId) {
-        return accounts.findById(accountId).map(Account::getBalanceCents).orElse(0L);
     }
 
     private long feeFor(String currency, long amountCents) {
