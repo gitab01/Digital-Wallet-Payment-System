@@ -1,0 +1,107 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: wallet-backend
+
+  # The runtime identity is weaker than the migration identity on purpose: it owns
+  # no DDL and holds no UPDATE or DELETE grant on the ledger.
+  datasource:
+    url: jdbc:sqlserver://${DB_HOST:localhost}:${DB_PORT:1433};databaseName=${DB_NAME:wallet_db};encrypt=true;trustServerCertificate=true;loginTimeout=15
+    username: ${DB_APP_USER:wallet_app}
+    password: ${DB_APP_PASSWORD:}
+    hikari:
+      pool-name: wallet-runtime
+      # Short, lock-holding transactions: if a checkout ever runs long that is a
+      # bug to surface, not a pool to enlarge.
+      maximum-pool-size: ${DB_POOL_MAX:12}
+      minimum-idle: 2
+      connection-timeout: 10000
+      max-lifetime: 900000
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        order_inserts: true
+
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    url: jdbc:sqlserver://${DB_HOST:localhost}:${DB_PORT:1433};databaseName=${DB_NAME:wallet_db};encrypt=true;trustServerCertificate=true;loginTimeout=15
+    user: ${DB_MIGRATE_USER:wallet_migrate}
+    password: ${DB_MIGRATE_PASSWORD:}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
+
+wallet:
+  jwt:
+    issuer: digital-wallet
+    # A short access TTL keeps a stolen token useful for minutes; rotation with an
+    # overlapping key window means a rotation never logs everyone out at once.
+    access-ttl: 15m
+    refresh-ttl: 30d
+    key-id-current: ${JWT_KEY_ID_CURRENT:key-2}
+    private-key-current: ${JWT_PRIVATE_KEY_CURRENT:}
+    public-key-current: ${JWT_PUBLIC_KEY_CURRENT:}
+    # Previous key is verify-only. Present so tokens issued before a rotation keep
+    # working until their own expiry.
+    key-id-previous: ${JWT_KEY_ID_PREVIOUS:key-1}
+    private-key-previous: ${JWT_PRIVATE_KEY_PREVIOUS:}
+    public-key-previous: ${JWT_PUBLIC_KEY_PREVIOUS:}
+
+  # E-mail addresses allowed to decide KYC submissions. Empty disables the endpoint.
+  reviewers: ${WALLET_REVIEWERS:ops@wallet.local}
+
+  pin:
+    max-failed-attempts: 5
+    lockout: 15m
+
+  fees:
+    # Basis points of the principal, plus a fixed floor per currency.
+    basis-points: 100
+    fixed-cents:
+      ETB: 0
+      USD: 0
+      EUR: 0
+
+  rate-limit:
+    login-per-minute: 5
+    register-per-hour: 20
+    pin-per-minute: 6
+    transfer-per-minute: 6
+    quote-per-minute: 30
+    general-per-minute: 120
+
+  anomaly:
+    # Advisory only. Crossing the threshold raises a review flag; it never blocks.
+    z-threshold: 3.0
+    minimum-history: 8
+    amount-weight: 0.6
+    hour-weight: 0.25
+    new-recipient-weight: 0.15
+
+  reconciliation:
+    # Nightly replay of the ledger into the projection. Drift freezes withdrawals
+    # rather than continuing silently.
+    cron: ${RECONCILIATION_CRON:0 30 2 * * *}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    com.wallet: INFO

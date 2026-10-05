@@ -1,0 +1,503 @@
+import { ApiError, parseEnvelope } from "./errors";
+import { API_ORIGIN, STORAGE_KEYS } from "./config";
+import type {
+  ApiErrorEnvelope,
+  AuditPage,
+  AuthResponse,
+  ChangePinRequest,
+  DownloadedFile,
+  FundingRequest,
+  KycUpgradeRequest,
+  KycView,
+  LoginRequest,
+  Page,
+  PublicUser,
+  QuoteQuery,
+  RegisterRequest,
+  StatementQuery,
+  Tokens,
+  TransactionDetail,
+  TransactionFilters,
+  TransactionRow,
+  TransferQuote,
+  TransferRequest,
+  TransferResult,
+  WalletAccount,
+  WalletView,
+} from "./types";
+
+/* --------------------------------------------------------------------------
+ * Session plumbing.
+ *
+ * The HTTP layer must not know about React, so AuthProvider registers hooks at
+ * mount. Two distinct 401 policies, straight from the brief:
+ *   silent      - reads & navigation: refresh the token and replay transparently.
+ *   interactive - anything that moves money or changes credentials: the session
+ *                 is dead for authorisation purposes, so re-prompt for a password
+ *                 and only replay if the user proves themselves again.
+ * ------------------------------------------------------------------------ */
+
+export type SessionPolicy = "none" | "silent" | "interactive";
+
+export interface ApiHooks {
+  getAccessToken: () => string | null;
+  /** Refreshes the session; resolves true when a usable access token exists. */
+  refreshSession: () => Promise<boolean>;
+  /** Re-prompts the user; resolves true when they re-authenticated. */
+  reauthenticate: () => Promise<boolean>;
+}
+
+let hooks: ApiHooks | null = null;
+
+export function configureApiHooks(next: ApiHooks | null): void {
+  hooks = next;
+}
+
+function accessToken(): string | null {
+  return hooks?.getAccessToken() ?? null;
+}
+
+interface RequestOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;
+  query?: Record<string, string | number | undefined | null>;
+  /** Attach the bearer token. Defaults to true. */
+  auth?: boolean;
+  session?: SessionPolicy;
+  signal?: AbortSignal;
+}
+
+export class AbortedError extends Error {
+  constructor() {
+    super("Request aborted");
+    this.name = "AbortedError";
+  }
+}
+
+function buildUrl(path: string, query?: RequestOptions["query"]): string {
+  const url = new URL(path.startsWith("/") ? path : `/${path}`, API_ORIGIN);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === "") continue;
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
+async function send(path: string, opts: RequestOptions): Promise<Response> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = opts.auth === false ? null : accessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const init: RequestInit = { method: opts.method ?? "GET", headers, cache: "no-store" };
+  if (opts.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(opts.body);
+  }
+  if (opts.signal) init.signal = opts.signal;
+
+  try {
+    return await fetch(buildUrl(path, opts.query), init);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw new AbortedError();
+    throw new ApiError({
+      status: 0,
+      code: "NETWORK_ERROR",
+      message: "Network request failed",
+      details: null,
+    });
+  }
+}
+
+async function readEnvelope(res: Response): Promise<ApiErrorEnvelope | null> {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("json")) return null;
+  try {
+    return (await res.json()) as ApiErrorEnvelope;
+  } catch {
+    return null;
+  }
+}
+
+function retryAfter(res: Response): number | null {
+  const raw = res.headers.get("retry-after");
+  if (!raw) return null;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+function errorFrom(res: Response, envelope: ApiErrorEnvelope | null): ApiError {
+  if (envelope?.code) {
+    return parseEnvelope(res.status, envelope, retryAfter(res));
+  }
+  return new ApiError({
+    status: res.status,
+    code: res.status === 401 ? "AUTH_REQUIRED" : "UNEXPECTED_RESPONSE",
+    message: res.ok ? "" : `Request failed with status ${res.status}`,
+    retryAfterSeconds: retryAfter(res),
+  });
+}
+
+function isSessionFailure(envelope: ApiErrorEnvelope | null): boolean {
+  return envelope?.code === "TOKEN_EXPIRED" || envelope?.code === "AUTH_REQUIRED";
+}
+
+/**
+ * A recoverable 401 is a `TOKEN_EXPIRED`/`AUTH_REQUIRED`; a `PIN_INVALID` is also
+ * a 401 and must fall straight through to the caller with its `attemptsLeft`.
+ */
+async function requestRaw(
+  path: string,
+  opts: RequestOptions,
+): Promise<{ res: Response; envelope: ApiErrorEnvelope | null }> {
+  const session = opts.session ?? "silent";
+  let res = await send(path, opts);
+  let envelope = res.ok ? null : await readEnvelope(res);
+
+  if (res.status === 401 && session !== "none" && isSessionFailure(envelope)) {
+    const restored =
+      session === "interactive"
+        ? await (hooks?.reauthenticate() ?? Promise.resolve(false))
+        : await (hooks?.refreshSession() ?? Promise.resolve(false));
+
+    if (restored) {
+      res = await send(path, opts);
+      envelope = res.ok ? null : await readEnvelope(res);
+    }
+  }
+  return { res, envelope };
+}
+
+async function requestJson<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const { res, envelope } = await requestRaw(path, opts);
+  if (!res.ok) throw errorFrom(res, envelope);
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiError({
+      status: res.status,
+      code: "UNEXPECTED_RESPONSE",
+      message: "Response body was not JSON",
+    });
+  }
+}
+
+/* ------------------------------------------------------------------- auth -- */
+
+export interface RefreshResponse {
+  tokens: Tokens;
+  user?: AuthResponse["user"];
+}
+
+/** `POST /api/auth/refresh` never consults the hooks (it *is* the recovery). */
+export async function login(body: LoginRequest): Promise<AuthResponse> {
+  return requestJson<AuthResponse>("/api/auth/login", {
+    method: "POST",
+    body,
+    auth: false,
+    session: "none",
+  });
+}
+
+export async function register(body: RegisterRequest): Promise<AuthResponse> {
+  return requestJson<AuthResponse>("/api/auth/register", {
+    method: "POST",
+    body,
+    auth: false,
+    session: "none",
+  });
+}
+
+export async function refreshSession(refreshToken: string): Promise<RefreshResponse> {
+  return requestJson<RefreshResponse>("/api/auth/refresh", {
+    method: "POST",
+    body: { refreshToken },
+    auth: false,
+    session: "none",
+  });
+}
+
+export async function logout(refreshToken: string | null): Promise<void> {
+  if (!refreshToken) return;
+  await requestJson<void>("/api/auth/logout", {
+    method: "POST",
+    body: { refreshToken },
+    auth: false,
+    session: "none",
+  });
+}
+
+/* ----------------------------------------------------------------- wallet -- */
+
+export function getWallet(signal?: AbortSignal): Promise<WalletView> {
+  return requestJson<WalletView>("/api/wallet", { signal });
+}
+
+export function openAccount(currency: string): Promise<WalletAccount> {
+  return requestJson<WalletAccount>("/api/accounts", { method: "POST", body: { currency } });
+}
+
+/* -------------------------------------------------------------- transfers -- */
+
+/**
+ * Pre-flight, no PIN. `silent` session policy: refreshing a quote mid-typing
+ * must never interrupt the user, and it moves no money.
+ */
+export async function getQuote(
+  query: QuoteQuery,
+  signal?: AbortSignal,
+): Promise<TransferQuote> {
+  return requestJson<TransferQuote>("/api/transfers/quote", {
+    query: { ...query },
+    signal,
+  });
+}
+
+/** Money movement: a stale token must re-prompt, never silently replay. */
+export function createTransfer(body: TransferRequest): Promise<TransferResult> {
+  return requestJson<TransferResult>("/api/transfers", {
+    method: "POST",
+    body,
+    session: "interactive",
+  });
+}
+
+export function deposit(body: FundingRequest): Promise<TransferResult> {
+  return requestJson<TransferResult>("/api/funds/deposit", {
+    method: "POST",
+    body,
+    session: "interactive",
+  });
+}
+
+export function withdraw(body: FundingRequest): Promise<TransferResult> {
+  return requestJson<TransferResult>("/api/funds/withdraw", {
+    method: "POST",
+    body,
+    session: "interactive",
+  });
+}
+
+/* -------------------------------------------------- history & statements -- */
+
+export function listTransactions(
+  filters: TransactionFilters,
+  signal?: AbortSignal,
+): Promise<Page<TransactionRow>> {
+  return requestJson<Page<TransactionRow>>("/api/transactions", {
+    query: {
+      accountId: filters.accountId,
+      from: filters.from,
+      to: filters.to,
+      page: filters.page,
+      size: filters.size,
+    },
+    signal,
+  });
+}
+
+export function getTransaction(reference: string, signal?: AbortSignal): Promise<TransactionDetail> {
+  return requestJson<TransactionDetail>(
+    `/api/transactions/${encodeURIComponent(reference)}`,
+    { signal },
+  );
+}
+
+function filenameFrom(res: Response, fallback: string): string {
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  const raw = utf8?.[1] ?? plain?.[1];
+  if (!raw) return fallback;
+  try {
+    return decodeURIComponent(raw.trim());
+  } catch {
+    return raw.trim();
+  }
+}
+
+/** `GET /api/statements` streams a file; errors still come back as JSON. */
+export async function downloadStatement(query: StatementQuery): Promise<DownloadedFile> {
+  const path = "/api/statements";
+  const opts: RequestOptions = {
+    query: { ...query },
+  };
+  const { res, envelope } = await requestRaw(path, opts);
+  const contentType = res.headers.get("content-type") ?? "";
+
+  if (!res.ok) {
+    if (!envelope) {
+      throw new ApiError({
+        status: res.status,
+        code: "UNEXPECTED_RESPONSE",
+        message: `Statement request failed with status ${res.status}`,
+      });
+    }
+    throw errorFrom(res, envelope);
+  }
+  if (contentType.includes("json")) {
+    throw new ApiError({
+      status: res.status,
+      code: "UNEXPECTED_RESPONSE",
+      message: "The statement endpoint returned JSON instead of a file",
+    });
+  }
+  const blob = await res.blob();
+  return {
+    blob,
+    filename: filenameFrom(res, `statement-${query.accountId}-${query.from}-${query.to}.${query.format}`),
+    contentType,
+  };
+}
+
+export function triggerDownload(file: DownloadedFile): void {
+  const url = URL.createObjectURL(file.blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/* -------------------------------------------------------------------- kyc -- */
+
+export function getKyc(): Promise<KycView> {
+  return requestJson<KycView>("/api/kyc");
+}
+
+export function submitKycUpgrade(body: KycUpgradeRequest): Promise<KycView> {
+  return requestJson<KycView>("/api/kyc", { method: "POST", body });
+}
+
+/** Operations-only (`ROLE_REVIEWER`). No screen in this client drives it. */
+export function decideKycSubmission(id: number, approve: boolean): Promise<KycView> {
+  return requestJson<KycView>(`/api/kyc/${id}/decision`, {
+    method: "POST",
+    body: { approve },
+  });
+}
+
+/* -------------------------------------------------------------- security -- */
+
+export function changePin(body: ChangePinRequest): Promise<void> {
+  return requestJson<void>("/api/me/pin", {
+    method: "POST",
+    body,
+    session: "interactive",
+  });
+}
+
+export function getAuditEvents(): Promise<AuditPage> {
+  return requestJson<AuditPage>("/api/me/audit");
+}
+
+/* --------------------------------------------------------- token storage -- */
+
+export function readStoredTokens(): Tokens | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.tokens);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Tokens>;
+    if (typeof parsed.accessToken !== "string" || typeof parsed.refreshToken !== "string") {
+      return null;
+    }
+    return {
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+      expiresIn: typeof parsed.expiresIn === "number" ? parsed.expiresIn : 900,
+      tokenType: typeof parsed.tokenType === "string" ? parsed.tokenType : "Bearer",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function storeTokens(tokens: Tokens | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (tokens) window.localStorage.setItem(STORAGE_KEYS.tokens, JSON.stringify(tokens));
+    else window.localStorage.removeItem(STORAGE_KEYS.tokens);
+  } catch {
+    /* private mode / quota: session stays in memory only */
+  }
+}
+
+export function readStoredEmail(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(STORAGE_KEYS.email);
+}
+
+export function storeEmail(email: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (email) window.localStorage.setItem(STORAGE_KEYS.email, email);
+    else window.localStorage.removeItem(STORAGE_KEYS.email);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * The contract has no session-profile endpoint, so the `user` returned by
+ * login/register is the only source of the display name and tier after a reload.
+ * This is presentation state only — every number on screen still comes from a
+ * fresh authenticated call.
+ */
+export function readStoredUser(): PublicUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.user);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PublicUser>;
+    if (
+      typeof parsed.id !== "number" ||
+      typeof parsed.email !== "string" ||
+      typeof parsed.fullName !== "string" ||
+      typeof parsed.kycTier !== "number"
+    ) {
+      return null;
+    }
+    return {
+      id: parsed.id,
+      email: parsed.email,
+      fullName: parsed.fullName,
+      kycTier: parsed.kycTier,
+      status: typeof parsed.status === "string" ? parsed.status : "UNKNOWN",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function storeUser(user: PublicUser | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (user) window.localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user));
+    else window.localStorage.removeItem(STORAGE_KEYS.user);
+  } catch {
+    /* private mode / quota: the profile simply stays in memory */
+  }
+}
+
+/** Cheap, non-authoritative expiry claim check on the JWT `exp`. */
+export function tokenExpiryMs(tokens: Tokens | null): number | null {
+  if (!tokens?.accessToken) return null;
+  const [, payload] = tokens.accessToken.split(".");
+  if (!payload) return null;
+  try {
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as {
+      exp?: number;
+    };
+    return typeof json.exp === "number" ? json.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}

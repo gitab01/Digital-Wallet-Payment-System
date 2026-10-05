@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: jdbc:sqlserver://${DB_HOST:localhost}:${DB_PORT:1433};databaseName=${DB_NAME:wallet_test};encrypt=true;trustServerCertificate=true;loginTimeout=15
+    username: ${DB_APP_USER:wallet_app}
+    password: ${DB_APP_PASSWORD:}
+  flyway:
+    url: jdbc:sqlserver://${DB_HOST:localhost}:${DB_PORT:1433};databaseName=${DB_NAME:wallet_test};encrypt=true;trustServerCertificate=true;loginTimeout=15
+    user: ${DB_MIGRATE_USER:wallet_migrate}
+    password: ${DB_MIGRATE_PASSWORD:}
+
+wallet:
+  # A nightly job must not fire in the middle of a test run and mutate balances that a
+  # test is asserting on.
+  reconciliation:
+    cron: "0 0 0 1 1 *"
+  rate-limit:
+    # Small and deterministic: the test asserts the limiter trips, not how generous it
+    # is in production.
+    login-per-minute: 3
+    transfer-per-minute: 3
+    pin-per-minute: 3
+    quote-per-minute: 3
+    general-per-minute: 100000
+
+logging:
+  level:
+    com.wallet: WARN
