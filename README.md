@@ -76,8 +76,9 @@ Windows authentication enabled for the account that runs the commands.
    ```
 
    The first signs up two customers, funds one, transfers between them, replays the
-   same idempotency key, exports both statement formats, exercises token refresh,
-   rate limiting, role isolation, and the reviewer decisions. The second connects over
+   same idempotency key, files both sides of an identity document and approves it,
+   exports both statement formats, exercises token refresh, rate limiting, role
+   isolation, and the reviewer decisions. The second connects over
    STOMP and asserts the balance arrives after the commit rather than before it.
    Both are safe to re-run: every email and idempotency key is generated fresh.
 

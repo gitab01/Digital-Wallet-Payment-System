@@ -1,6 +1,10 @@
 import http from 'node:http';
 
+import { fileScan } from './kyc-scan.mjs';
+
 const BASE = { host: '127.0.0.1', port: 8080 };
+/** fetch needs a URL where the http helper needs a host and a port; this is the same endpoint. */
+const API_ORIGIN = 'http://127.0.0.1:8080';
 
 function call(method, path, { body, token } = {}) {
   return new Promise((resolve, reject) => {
@@ -75,8 +79,11 @@ check('missing pin refused', await call('POST', '/api/funds/deposit', {
 check('malformed amount refused', await call('POST', '/api/funds/deposit', {
   token: tokOps, body: { currency: 'ETB', amount: '10.009', pin: '7788', idempotencyKey: `f${stamp}` },
 }), 400);
+// Bob, not the reviewer: ops@wallet.local exists between runs, so a wrong PIN here
+// would one day be refused as PIN_LOCKED (403) for the accumulated attempts of every
+// earlier run rather than for this one's bad PIN.
 check('wrong pin refused', await call('POST', '/api/funds/deposit', {
-  token: tokOps, body: { currency: 'ETB', amount: '10.00', pin: '9999', idempotencyKey: `w${stamp}` },
+  token: tokB, body: { currency: 'ETB', amount: '10.00', pin: '9999', idempotencyKey: `w${stamp}` },
 }), 401);
 
 console.log('\n--- money movement (alice) ---');
@@ -179,6 +186,10 @@ const queue = check('kyc queue', await call('GET', '/api/admin/kyc-queue', { tok
 note('queue size', queue.length);
 const mine = queue.find((r) => r.email === emailA);
 note('alice submission', JSON.stringify(mine));
+// A reviewer cannot approve what they cannot see: the decision endpoint refuses a
+// submission without both sides on file, so the scans go up first.
+await fileScan(API_ORIGIN, tokA, 'FRONT', 31);
+await fileScan(API_ORIGIN, tokA, 'BACK', 32);
 const approved = check('approve alice', await call('POST', `/api/kyc/${mine.recordId}/decision`, { token: tokOps, body: { approve: true } }));
 note('decision', JSON.stringify(approved));
 check('second decision on same record', await call('POST', `/api/kyc/${mine.recordId}/decision`, { token: tokOps, body: { approve: false } }), 409);

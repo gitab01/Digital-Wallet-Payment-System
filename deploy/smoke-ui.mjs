@@ -25,7 +25,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deflateSync } from 'node:zlib';
+
+import { fileScan as uploadScan } from './kyc-scan.mjs';
 
 const APP = (process.env.UI_URL || 'http://localhost:3000').replace(/\/+$/, '');
 const API = (process.env.API_URL || 'http://localhost:8080').replace(/\/+$/, '');
@@ -69,70 +70,7 @@ const api = (method, path, { body, token } = {}) =>
 
 /* ------------------------------------------------------------------ seed */
 
-/**
- * A decodable greyscale PNG, built here rather than carried as base64 so its pixel
- * content can vary per call. The service re-encodes whatever it receives, so an image
- * it could not decode would fail the seed rather than the product.
- */
-function scanImage(width, height, seed) {
-  const table = scanImage.table ??= (() => {
-    const t = new Int32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let bit = 0; bit < 8; bit++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      t[n] = c;
-    }
-    return t;
-  })();
-  const crc = (buf) => {
-    let c = 0xffffffff;
-    for (const byte of buf) c = table[(c ^ byte) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type, data) => {
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
-    const sum = Buffer.alloc(4);
-    sum.writeUInt32BE(crc(body));
-    return Buffer.concat([length, body, sum]);
-  };
-
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 0; // colour type: greyscale
-  const stride = width + 1;
-  const raw = Buffer.alloc(height * stride);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      raw[y * stride + 1 + x] = (x * 7 + y * 13 + seed * 31) & 0xff;
-    }
-  }
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-async function fileScan(token, side, seed) {
-  const form = new FormData();
-  form.append('side', side);
-  form.append('file', new Blob([scanImage(640, 400, seed)], { type: 'image/png' }), 'scan.png');
-  // No Content-Type on the request: fetch generates the multipart boundary, and a
-  // hand-written header here would leave the server with parts it cannot split.
-  const res = await fetch(`${API}/api/kyc/documents`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-  });
-  const text = await res.text();
-  if (res.status !== 201) throw new Error(`the ${side.toLowerCase()} scan was refused: ${res.status} ${text}`);
-  return JSON.parse(text);
-}
+const fileScan = (token, side, seed) => uploadScan(API, token, side, seed);
 
 const stamp = Date.now();
 const email = `ui.${stamp}@example.com`;
@@ -386,12 +324,16 @@ async function loaded() {
   }
   console.log('   note: still loading after 40s, the screenshot may show a skeleton');
 }
+/** Asks the dev server for a route so its first compile happens now, not under the browser. */
+async function warm(path) {
+  await fetch(APP + path, { cache: 'no-store' }).then((res) => res.text(), () => { /* the browser will report it */ });
+}
 async function navigate(path) {
   // The dev server compiles a route on its first request, and the browser sits on the
   // previous page while that happens. Ten seconds of that was enough to spend the
   // hydration budget on a screen that renders in six once warm, so ask for the route
   // here instead and let the browser load something that is already built.
-  await fetch(APP + path, { cache: 'no-store' }).then((res) => res.text(), () => { /* the browser will report it */ });
+  await warm(path);
   await send('Page.navigate', { url: APP + path });
   await settled();
   await hydrated();
@@ -464,6 +406,15 @@ async function shot(name) {
 }
 
 /* -------------------------------------------------------------- desktop */
+
+/* Client-side navigation never goes through navigate(), so the sign-in redirect and the
+   desk's link into a record would each sit on the dev server's first compile of that
+   route -- on a cold start that is longer than the 25 seconds the walk allows. One
+   concrete path per dynamic segment is enough; the compiled route serves the segment. */
+await Promise.all([
+  '/', '/history', '/statement', '/settings', '/verify', '/transfer', '/register',
+  '/admin', '/admin/clients', '/admin/health', '/admin/clients/1', '/transactions/WLT-0',
+].map(warm));
 
 await viewport(1280, 900);
 console.log('\n[1280x900]');
