@@ -125,6 +125,28 @@ console.log('JWT_PRIVATE_KEY_CURRENT='+privateKey.toString('base64'));
 console.log('JWT_PUBLIC_KEY_CURRENT='+publicKey.toString('base64'));"
 ```
 
+In order, because the service will not start without its database:
+
+1. **Provision the SQL Server.** `deploy/provision.mjs` is written for the local
+   Windows-auth instance, so against a remote server run its statements yourself as a
+   sysadmin: two logins (`wallet_migrate`, `wallet_app`), a `wallet_runtime` role per
+   database, `db_owner` for the migrator and `wallet_runtime` for the runtime login. The
+   table grants and the append-only `DENY` are not yours to write -- they arrive with
+   migration `V3` when the API first starts. Use long random passwords; the port is
+   reachable from the internet by design.
+2. **Create the Render service.** Dashboard -> New -> Blueprint, connect this
+   repository, choose the branch, and Render reads `render.yaml`. It asks for the values
+   marked `sync: false` there: `DB_HOST`, `DB_APP_PASSWORD`, `DB_MIGRATE_PASSWORD`,
+   `JWT_PRIVATE_KEY_CURRENT`, `JWT_PUBLIC_KEY_CURRENT`, `WALLET_REVIEWERS`. Nothing else
+   needs typing.
+3. **Check it is alive.** `https://<the service's url>/actuator/health` must answer
+   `UP`. The first boot runs Flyway V1..V5 and takes a couple of minutes; if the
+   instance is killed mid-start it is short of memory, not broken.
+4. **Point the client at it and promote.** From `frontend/`:
+   `vercel env add NEXT_PUBLIC_API_BASE_URL production`, then
+   `vercel deploy --prod`. The URL is baked in at build time, so a change to it means a
+   new deployment, not a restart.
+
 Three things to know before this serves real balances:
 
 - Render's free plan hosts Node, Python and Rails only. A Docker service, which is what
