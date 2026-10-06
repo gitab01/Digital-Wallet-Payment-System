@@ -1,5 +1,6 @@
 package com.wallet.web;
 
+import com.wallet.support.PageView;
 import com.wallet.error.ApiException;
 import com.wallet.security.SecurityUser;
 import com.wallet.service.AuthService;
@@ -38,7 +39,7 @@ public class TransactionController {
     }
 
     @GetMapping("/transactions")
-    public Responses.PageView<WalletQueryService.TransactionRow> history(
+    public PageView<WalletQueryService.TransactionRow> history(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
@@ -49,7 +50,7 @@ public class TransactionController {
         Page<com.wallet.domain.Transfer> found =
                 queries.page(userId, accountId, lower(from), upper(to), page, size);
         List<WalletQueryService.TransactionRow> items = queries.rows(userId, found);
-        return new Responses.PageView<>(items, found.getTotalElements(), found.getNumber(), found.getSize());
+        return new PageView<>(items, found.getTotalElements(), found.getNumber(), found.getSize());
     }
 
     /**

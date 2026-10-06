@@ -1,9 +1,13 @@
 import Link from "next/link";
+import { BrandMark } from "@/components/BrandMark";
 
 export default function NotFound() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-5 px-4 py-16">
-      <p className="label">Digital Wallet</p>
+      <p className="label flex items-center gap-2.5">
+        <BrandMark className="h-5 w-5 text-ink" />
+        Mela Wallet
+      </p>
       <h1 className="text-h2 font-semibold tracking-tight">This page does not exist</h1>
       <p className="text-body leading-6 text-ink-muted">
         Nothing was moved, nothing was changed. Check the address, or go back to your wallets.

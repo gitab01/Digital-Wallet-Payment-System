@@ -1,5 +1,13 @@
 server:
-  port: ${SERVER_PORT:8080}
+  # PORT is the name hosting platforms give the bound port; SERVER_PORT stays the
+  # local one so nothing that already sets it has to change.
+  port: ${PORT:${SERVER_PORT:8080}}
+  tomcat:
+    # When an upload is refused for size, the rest of its body is still arriving.
+    # Tomcat drains that remainder only up to this budget, and beyond it resets the
+    # socket instead — so a phone posting a 12 MB photo would lose its connection
+    # rather than read the 413 that explains what to do. Matched to max-request-size.
+    max-swallow-size: 20MB
 
 spring:
   application:
@@ -30,6 +38,13 @@ spring:
           time_zone: UTC
         order_inserts: true
 
+  servlet:
+    multipart:
+      # The document endpoint's own 8 MB ceiling, stated here too so a refusal happens
+      # while the body is streaming in rather than after it has all been buffered.
+      max-file-size: 8MB
+      max-request-size: 20MB
+
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     url: jdbc:sqlserver://${DB_HOST:localhost}:${DB_PORT:1433};databaseName=${DB_NAME:wallet_db};encrypt=true;trustServerCertificate=true;loginTimeout=15
@@ -41,8 +56,13 @@ spring:
     validate-on-migrate: true
 
 wallet:
+  # The client's origin, and a hosted client's with it. Held here rather than only as
+  # the @Value default in SecurityConfig, so admitting a deployed frontend is a
+  # deployment setting instead of a code change.
+  cors-allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:3000,http://127.0.0.1:3000,http://[::1]:3000}
+
   jwt:
-    issuer: digital-wallet
+    issuer: mela-wallet
     # A short access TTL keeps a stolen token useful for minutes; rotation with an
     # overlapping key window means a rotation never logs everyone out at once.
     access-ttl: 15m
@@ -78,6 +98,9 @@ wallet:
     transfer-per-minute: 6
     quote-per-minute: 30
     general-per-minute: 120
+    # Decoding and re-encoding a scan is the most expensive thing this service does per
+    # request, so it does not ride on the general read budget.
+    documents-per-minute: 12
 
   anomaly:
     # Advisory only. Crossing the threshold raises a review flag; it never blocks.
@@ -91,6 +114,16 @@ wallet:
     # Nightly replay of the ledger into the projection. Drift freezes withdrawals
     # rather than continuing silently.
     cron: ${RECONCILIATION_CRON:0 30 2 * * *}
+
+  documents:
+    # Where the re-encoded identity scans live. It is outside the served tree and holds
+    # nothing but files the database names, so the directory itself is not a secret --
+    # but it is personal data, and it belongs on the encrypted volume.
+    storage-dir: ${KYC_DOC_STORAGE_DIR:./var/kyc-documents}
+    max-bytes: 8388608
+    # Longest edge before the image is re-encoded. Enough to read a small print line on
+    # screen, small enough that a 50-megapixel phone upload cannot fill the disk.
+    max-edge: 1600
 
 management:
   endpoints:

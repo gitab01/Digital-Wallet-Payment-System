@@ -13,13 +13,21 @@ wallet:
   # test is asserting on.
   reconciliation:
     cron: "0 0 0 1 1 *"
+  # Under target/ so `mvn clean` removes every scan a run filed, and never beside the
+  # directory the real service serves from.
+  documents:
+    storage-dir: ./target/kyc-documents-test
   rate-limit:
     # Small and deterministic: the test asserts the limiter trips, not how generous it
     # is in production.
     login-per-minute: 3
+    # Every test registers its own identities, and the run is one JVM, so the signup
+    # budget is a property of the product rather than something the suite is testing.
+    register-per-hour: 1000
     transfer-per-minute: 3
     pin-per-minute: 3
     quote-per-minute: 3
+    documents-per-minute: 30
     general-per-minute: 100000
 
 logging:

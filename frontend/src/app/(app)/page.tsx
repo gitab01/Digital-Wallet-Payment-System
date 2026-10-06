@@ -12,6 +12,7 @@ import { useWallet } from "@/providers/WalletProvider";
 import { useToast } from "@/providers/ToastProvider";
 import { AccountCard } from "@/components/AccountCard";
 import { FundingDialog } from "@/components/FundingDialog";
+import { KycIncompleteNotice } from "@/components/KycIncompleteNotice";
 import { PageHeader } from "@/components/AppShell";
 import { TransactionRowItem } from "@/components/TransactionRowItem";
 import { Amount, AmountBare } from "@/components/ui/Amount";
@@ -92,6 +93,8 @@ export default function WalletHomePage() {
             {error}
           </Callout>
         ) : null}
+
+        <KycIncompleteNotice />
 
         {data?.withdrawalsFrozen ? (
           <Callout tone="error" title="Withdrawals are frozen">

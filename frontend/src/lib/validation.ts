@@ -1,4 +1,5 @@
 import { AMOUNT_INPUT_RE } from "./money";
+import { ACCEPTED_IMAGE_TYPES, MAX_DOCUMENT_BYTES } from "./types";
 
 /**
  * Client-side gates that mirror the contract's validation rules. These exist to
@@ -72,6 +73,20 @@ export function validateDocumentNumber(value: string): string | null {
   const v = value.trim();
   if (!v) return "Enter your document number.";
   if (!DOC_RE.test(v)) return "Use 4-20 letters, digits or hyphens.";
+  return null;
+}
+
+/**
+ * Checked before a byte is sent: the review desk only reads JPEG or PNG at 8 MB
+ * or under, and a phone camera roll happily offers both kinds of overage.
+ */
+export function validateImageFile(file: File | null | undefined, label: string): string | null {
+  if (!file) return `${label} — take a photo or choose an image.`;
+  if (!(ACCEPTED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
+    return `${file.name || "That file"} is ${file.type || "not a recognised type"}. Use a JPEG or PNG image.`;
+  }
+  if (file.size === 0) return "That image came out empty. Retake it.";
+  if (file.size > MAX_DOCUMENT_BYTES) return "That image is over 8 MB. Retake it or choose a smaller file.";
   return null;
 }
 

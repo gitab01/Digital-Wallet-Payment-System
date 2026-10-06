@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { changePin, getAuditEvents, getKyc, submitKycUpgrade } from "@/lib/api";
 import { ApiError, describeError } from "@/lib/errors";
+import { missingSidesFor } from "@/lib/kyc";
 import { formatDateTime } from "@/lib/money";
 import { useDocumentTitle } from "@/lib/useDocumentTitle";
 import {
@@ -15,7 +17,10 @@ import {
 } from "@/lib/validation";
 import {
   DOCUMENT_TYPES,
+  documentTypeLabel,
+  requiredSidesFor,
   type AuditEvent,
+  type DocumentSide,
   type DocumentType,
   type KycView,
   type Money,
@@ -35,8 +40,13 @@ import { Panel, Skeleton } from "@/components/ui/Panel";
 
 const DOCUMENT_OPTIONS = DOCUMENT_TYPES.map((value) => ({
   value,
-  label: value === "NATIONAL_ID" ? "National ID" : "Passport",
+  label: documentTypeLabel(value),
 }));
+
+const SIDE_LABEL: Record<DocumentSide, string> = {
+  FRONT: "Front",
+  BACK: "Back",
+};
 
 export default function SettingsPage() {
   useDocumentTitle("Settings");
@@ -163,37 +173,63 @@ export default function SettingsPage() {
                 <div>
                   <p className="label mb-2">Documents on file</p>
                   <ul className="space-y-2">
-                    {kyc.documents.map((document) => (
-                      <li
-                        key={`${document.tier}-${document.documentType}`}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-body font-medium">
-                            {document.documentType === "NATIONAL_ID"
-                              ? "National ID"
-                              : document.documentType === "PASSPORT"
-                                ? "Passport"
-                                : document.documentType}
-                          </p>
+                    {kyc.documents.map((document) => {
+                      const missing = missingSidesFor(document);
+                      return (
+                        <li
+                          key={document.recordId}
+                          className="rounded-md border border-line px-4 py-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-body font-medium">
+                              {documentTypeLabel(document.documentType)}
+                            </p>
+                            <Chip
+                              tone={
+                                document.status === "APPROVED"
+                                  ? "positive"
+                                  : document.status === "REJECTED"
+                                    ? "negative"
+                                    : "muted"
+                              }
+                            >
+                              {document.status}
+                            </Chip>
+                          </div>
                           <p className="mt-0.5 text-label text-ink-faint">
                             Tier {document.tier} · ends {document.last4} · submitted{" "}
                             {formatDateTime(document.submittedAt)}
                           </p>
-                        </div>
-                        <Chip
-                          tone={
-                            document.status === "APPROVED"
-                              ? "positive"
-                              : document.status === "REJECTED"
-                                ? "negative"
-                                : "muted"
-                          }
-                        >
-                          {document.status}
-                        </Chip>
-                      </li>
-                    ))}
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {requiredSidesFor(document.documentType).map((side) => {
+                              const storedId = document.sides?.[side] ?? null;
+                              return (
+                                <Chip key={side} tone={storedId ? "positive" : "negative"}>
+                                  {SIDE_LABEL[side]}
+                                  {storedId ? (
+                                    <>
+                                      {" on file "}
+                                      <span className="num">#{storedId}</span>
+                                    </>
+                                  ) : (
+                                    " missing"
+                                  )}
+                                </Chip>
+                              );
+                            })}
+                          </div>
+                          {missing.length > 0 && document.status === "SUBMITTED" ? (
+                            <Link
+                              href="/verify"
+                              className="mt-2 inline-flex items-center gap-1 text-label font-medium uppercase tracking-wide text-ink-muted hover:text-ink"
+                            >
+                              Photograph the {missing.map((side) => SIDE_LABEL[side].toLowerCase()).join(" and ")}
+                              <Icon name="chevronRight" className="h-3.5 w-3.5" />
+                            </Link>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}

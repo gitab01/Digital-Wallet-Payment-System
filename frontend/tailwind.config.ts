@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Design system for Digital Wallet.
+ * Design system for Mela Wallet.
  *
  * Rules that are deliberate and must not drift:
  *  - Surfaces are pure white (#ffffff) only. No gradients, no patterns, no glows,

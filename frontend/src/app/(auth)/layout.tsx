@@ -3,19 +3,17 @@
 import type { ReactNode } from "react";
 
 import Link from "next/link";
-import { Icon } from "@/components/ui/Icon";
+import { BrandMark } from "@/components/BrandMark";
 
 /** Unauthenticated frame: one column, generous space, nothing but the form. */
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col bg-white">
       <header className="border-b border-line px-4 py-4 sm:px-6">
-        <Link href="/" className="inline-flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded border border-ink text-ink">
-            <Icon name="wallet" className="h-4 w-4" />
-          </span>
+        <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Mela Wallet home">
+          <BrandMark className="h-6 w-6 text-ink" />
           <span className="text-label font-semibold uppercase leading-none tracking-[0.14em] text-ink">
-            Digital&nbsp;Wallet
+            Mela&nbsp;Wallet
           </span>
         </Link>
       </header>

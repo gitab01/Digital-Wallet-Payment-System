@@ -4,6 +4,7 @@ import type {
   ApiErrorCode,
   AttemptsLeftDetails,
   LimitDetails,
+  MissingSidesDetails,
   PinLockedDetails,
 } from "./types";
 
@@ -58,6 +59,16 @@ function asNumber(details: Record<string, unknown> | null, key: string): number 
 function asString(details: Record<string, unknown> | null, key: string): string | null {
   const raw = details?.[key];
   return typeof raw === "string" && raw.length > 0 ? raw : null;
+}
+
+/** `DOCUMENTS_INCOMPLETE` lists the blocking sides; say which ones instead of guessing. */
+function missingSideNames(details: Record<string, unknown> | null): string | null {
+  const raw = (details as MissingSidesDetails | null)?.missing;
+  const sides = Array.isArray(raw)
+    ? raw.filter((side): side is string => typeof side === "string" && side.length > 0)
+    : [];
+  if (sides.length === 0) return null;
+  return sides.map((side) => side.toLowerCase().replace(/_/g, " ")).join(", ");
 }
 
 export function describeError(err: unknown, fallbackContext?: string): string {
@@ -131,6 +142,21 @@ export function describeError(err: unknown, fallbackContext?: string): string {
       return "This customer has already been onboarded. Sign in instead.";
     case "EMAIL_TAKEN":
       return "That email address is already registered. Sign in instead, or use a different address.";
+    /* ----------------------------------------------------- documents --- */
+    case "UNSUPPORTED_IMAGE":
+      return "That file is not a JPEG or PNG photograph. Take or pick a picture of the document itself.";
+    case "FILE_TOO_LARGE":
+      return "That image is larger than the 8 MB the review desk accepts. Re-shoot it, or crop it tighter.";
+    case "NO_OPEN_SUBMISSION":
+      return "There is no submission open for documents right now. Nothing was uploaded.";
+    case "DOCUMENTS_INCOMPLETE": {
+      const sides = missingSideNames(err.details);
+      return sides
+        ? `This submission cannot be approved yet: the ${sides} image${sides.includes(",") ? "s are" : " is"} still missing.`
+        : "This submission cannot be approved yet: not every required side of the document has been uploaded.";
+    }
+    case "ACCESS_DENIED":
+      return "This account is not on the review desk, so it cannot read or change other customers' records.";
     /* -------------------------------------------------------- general --- */
     case "VALIDATION_FAILED": {
       const fieldError = asString(d, "message") ?? asString(d, "detail");

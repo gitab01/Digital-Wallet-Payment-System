@@ -1,5 +1,6 @@
 package com.wallet.web;
 
+import com.wallet.support.PageView;
 import com.wallet.security.SecurityUser;
 import com.wallet.service.AuthService;
 import com.wallet.service.PinService;
@@ -46,10 +47,10 @@ public class MeController {
      * about a stolen session before you find out from the ledger.
      */
     @GetMapping("/audit")
-    public Responses.PageView<Responses.AuditRow> audit(@RequestParam(defaultValue = "50") int size) {
+    public PageView<Responses.AuditRow> audit(@RequestParam(defaultValue = "50") int size) {
         List<Responses.AuditRow> items = queries.recentAudit(SecurityUser.requiredId(), size).stream()
                 .map(Responses::audit)
                 .toList();
-        return new Responses.PageView<>(items, items.size(), 0, size);
+        return new PageView<>(items, items.size(), 0, size);
     }
 }

@@ -13,6 +13,9 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     List<Account> findByUserIdAndKindOrderByCurrencyAsc(Long userId, Account.Kind kind);
 
+    /** One read for a whole page of clients, grouped by owner in the caller. */
+    List<Account> findByUserIdInAndKindOrderByUserIdAscCurrencyAsc(List<Long> userIds, Account.Kind kind);
+
     Optional<Account> findByUserIdAndCurrencyAndKind(Long userId, String currency, Account.Kind kind);
 
     Optional<Account> findByKindAndCurrency(Account.Kind kind, String currency);

@@ -34,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private enum Rule { LOGIN, REGISTER, MONEY, QUOTE, GENERAL }
+    private enum Rule { LOGIN, REGISTER, MONEY, QUOTE, DOCUMENT, GENERAL }
 
     private record Limit(int capacity, Duration period) {}
 
@@ -84,6 +84,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean post = HttpMethod.POST.matches(request.getMethod());
         if (post && path.equals("/api/auth/login")) return Rule.LOGIN;
         if (post && path.equals("/api/auth/register")) return Rule.REGISTER;
+        if (post && path.equals("/api/kyc/documents")) return Rule.DOCUMENT;
         // Everything in these branches carries a PIN, so they share the strictest budget.
         if (post && (path.equals("/api/transfers") || path.startsWith("/api/funds/"))) return Rule.MONEY;
         if (path.equals("/api/transfers/quote")) return Rule.QUOTE;
@@ -99,6 +100,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case MONEY -> new Limit(Math.min(rl.getTransferPerMinute(), rl.getPinPerMinute()),
                     Duration.ofMinutes(1));
             case QUOTE -> new Limit(rl.getQuotePerMinute(), Duration.ofMinutes(1));
+            case DOCUMENT -> new Limit(rl.getDocumentsPerMinute(), Duration.ofMinutes(1));
             case GENERAL -> new Limit(rl.getGeneralPerMinute(), Duration.ofMinutes(1));
         };
     }
@@ -113,7 +115,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private String key(HttpServletRequest request, Rule rule) {
         String subject = switch (rule) {
             case LOGIN, REGISTER -> "ip:" + clientIp(request);
-            case MONEY, QUOTE, GENERAL -> {
+            case MONEY, QUOTE, DOCUMENT, GENERAL -> {
                 String id = SecurityUser.id();
                 yield id != null ? "u:" + id : "ip:" + clientIp(request);
             }

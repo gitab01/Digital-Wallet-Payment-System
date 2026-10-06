@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { useAuth } from "@/providers/AuthProvider";
 import { useWallet } from "@/providers/WalletProvider";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { BrandMark } from "@/components/BrandMark";
 import { ReauthDialog } from "@/components/ReauthDialog";
 import { Icon, type IconName } from "@/components/ui/Icon";
 
@@ -14,14 +15,20 @@ interface NavItem {
   href: string;
   label: string;
   icon: IconName;
+  /** Six uppercase tabs do not fit 390px at full length, so phones get a short one. */
+  mobileLabel?: string;
 }
 
-const NAV: NavItem[] = [
+const CUSTOMER_NAV: NavItem[] = [
   { href: "/", label: "Wallet", icon: "wallet" },
   { href: "/transfer", label: "Transfer", icon: "send" },
   { href: "/history", label: "History", icon: "history" },
   { href: "/statement", label: "Statement", icon: "document" },
   { href: "/settings", label: "Settings", icon: "settings" },
+];
+
+const REVIEW_NAV: NavItem[] = [
+  { href: "/admin", label: "Operations", mobileLabel: "Review", icon: "shield" },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -34,15 +41,13 @@ function Brand({ compact = false }: { compact?: boolean }) {
     <Link
       href="/"
       className="group inline-flex items-center gap-2.5"
-      aria-label="Digital Wallet home"
+      aria-label="Mela Wallet home"
     >
-      <span className="flex h-7 w-7 items-center justify-center rounded border border-ink text-ink">
-        <Icon name="wallet" className="h-4 w-4" />
-      </span>
+      <BrandMark className={`shrink-0 text-ink ${compact ? "h-6 w-6" : "h-7 w-7"}`} />
       <span
         className={`font-semibold uppercase leading-none tracking-[0.14em] text-ink ${compact ? "text-label" : "text-[0.8125rem]"}`}
       >
-        Digital&nbsp;Wallet
+        Mela&nbsp;Wallet
       </span>
     </Link>
   );
@@ -50,12 +55,15 @@ function Brand({ compact = false }: { compact?: boolean }) {
 
 /**
  * Sidebar on tablet-and-up, top bar plus bottom tabs on phones. Five destinations
- * fit 390px without a hamburger, so there is no hidden navigation on mobile.
+ * fit 390px without a hamburger, so there is no hidden navigation on mobile; the
+ * sixth appears for reviewers only, and still fits.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { email, signOut } = useAuth();
+  const { email, signOut, isReviewer } = useAuth();
   const { data } = useWallet();
+
+  const nav = isReviewer ? [...CUSTOMER_NAV, ...REVIEW_NAV] : CUSTOMER_NAV;
 
   return (
     <div className="min-h-dvh bg-white">
@@ -77,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <nav className="flex-1 px-3 py-5" aria-label="Primary">
           <ul className="space-y-1">
-            {NAV.map((item) => {
+            {nav.map((item) => {
               const active = isActive(pathname, item.href);
               return (
                 <li key={item.href}>
@@ -125,23 +133,29 @@ export function AppShell({ children }: { children: ReactNode }) {
         aria-label="Primary"
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
-        <ul className="grid grid-cols-5">
-          {NAV.map((item) => {
+        {/*
+          Both class strings are written out literally because the scanner only
+          keeps what appears in source. Six tabs at 390px leave 65px per
+          destination, so the label gives up a pixel of size and the longest word
+          still lands on one line.
+        */}
+        <ul className={isReviewer ? "grid grid-cols-6" : "grid grid-cols-5"}>
+          {nav.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <li key={item.href}>
                 <Link
                   href={item.href}
                   aria-current={active ? "page" : undefined}
-                  className={`relative flex flex-col items-center gap-1 py-2.5 text-label uppercase tracking-wide ${
-                    active ? "font-semibold text-ink" : "text-ink-faint"
-                  }`}
+                  className={`relative flex flex-col items-center gap-1 px-0.5 py-2.5 text-center uppercase ${
+                    isReviewer ? "text-[0.625rem] leading-3 tracking-[0.02em]" : "text-label tracking-wide"
+                  } ${active ? "font-semibold text-ink" : "text-ink-faint"}`}
                 >
                   {active ? (
                     <span aria-hidden="true" className="absolute inset-x-4 top-0 h-0.5 bg-ink" />
                   ) : null}
                   <Icon name={item.icon} className="h-5 w-5" />
-                  {item.label}
+                  <span className="w-full truncate">{item.mobileLabel ?? item.label}</span>
                 </Link>
               </li>
             );

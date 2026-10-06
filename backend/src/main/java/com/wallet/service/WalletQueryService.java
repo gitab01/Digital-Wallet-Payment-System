@@ -68,7 +68,7 @@ public class WalletQueryService {
                              Map<String, LimitView> limitsByCurrency, boolean withdrawalsFrozen,
                              List<TransactionRow> recent) {}
 
-    private static final String SUMMARY_CURRENCY = "ETB";
+    static final String SUMMARY_CURRENCY = "ETB";
     private static final int RECENT_SIZE = 12;
 
     private final UserRepository users;

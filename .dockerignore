@@ -1,0 +1,12 @@
+# The image builds the API alone. Everything the Next.js client needs arrives through
+# Vercel, and .git, node_modules and target together are far larger than the source --
+# leaving them out of the context is the difference between a 5-second upload and a
+# several-minute one.
+.git
+.github
+**/node_modules
+**/.next
+**/target
+backend/.env
+backend/var
+frontend/.env*

@@ -155,6 +155,34 @@ export function formatRelative(value: IsoDateTime | null | undefined): string {
   return formatDate(value);
 }
 
+/**
+ * Elapsed time with no "ago" — a review queue row reads "Waiting 3 h", which is
+ * the number that decides whether a submission is overdue.
+ */
+export function formatDurationSince(value: IsoDateTime | null | undefined): string {
+  if (!value) return "—";
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return "—";
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} d`;
+  return `${Math.floor(days / 30)} mo`;
+}
+
+/** Stored image size, as a reviewer reads it. Not money, so rounding is fine. */
+export function formatBytes(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "—";
+  if (value < 1024) return `${value} B`;
+  const kb = value / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
 /** Today as yyyy-mm-dd, for date input defaults. */
 export function todayIso(): IsoDate {
   return new Date().toISOString().slice(0, 10);

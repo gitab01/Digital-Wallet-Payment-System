@@ -24,6 +24,7 @@ import {
   storeTokens,
   storeUser,
   tokenExpiryMs,
+  tokenRoles,
 } from "@/lib/api";
 import { ApiError, describeError } from "@/lib/errors";
 import type { AuthResponse, LoginRequest, PublicUser, RegisterRequest, Tokens } from "@/lib/types";
@@ -42,11 +43,19 @@ export interface ReauthRequest {
   reason: string;
 }
 
+/** Either spelling of the claim: a Spring authority or the bare role name. */
+const REVIEWER_ROLES = new Set(["ROLE_REVIEWER", "REVIEWER"]);
+
 interface AuthContextValue {
   status: SessionStatus;
   user: PublicUser | null;
   email: string | null;
   accessToken: string | null;
+  /**
+   * Read off the `roles` claim, so it only decides what is *offered*. Every
+   * operations route re-checks `ROLE_REVIEWER` at the server.
+   */
+  isReviewer: boolean;
   beginLogin: (body: LoginRequest) => Promise<AuthResponse>;
   beginRegistration: (body: RegisterRequest) => Promise<AuthResponse>;
   signOut: () => Promise<void>;
@@ -263,12 +272,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => configureApiHooks(null);
   }, [doRefresh, reauthenticate]);
 
+  const isReviewer = useMemo(
+    () => tokenRoles(tokens?.accessToken ?? null).some((role) => REVIEWER_ROLES.has(role)),
+    [tokens?.accessToken],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
       user,
       email,
       accessToken: tokens?.accessToken ?? null,
+      isReviewer,
       beginLogin,
       beginRegistration,
       signOut,
@@ -284,6 +299,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       email,
       tokens?.accessToken,
+      isReviewer,
       beginLogin,
       beginRegistration,
       signOut,

@@ -11,6 +11,9 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 
 import java.sql.SQLException;
 import java.time.format.DateTimeParseException;
@@ -130,6 +133,42 @@ public class ApiExceptionHandler {
         log.error("unhandled data access failure", ex);
         return ResponseEntity.internalServerError()
                 .body(body("INTERNAL", "The service could not complete this request.", Map.of(), req));
+    }
+
+    /**
+     * An oversized scan is refused by the multipart resolver while the body is still
+     * streaming, so no controller runs and no service decides. The code has to be the
+     * one the upload endpoint itself would have returned, or the client needs two
+     * branches for the same failure.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<Map<String, Object>> handleTooLarge(MaxUploadSizeExceededException ex,
+                                                       HttpServletRequest req) {
+        log.debug("rejected oversized upload", ex);
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(body("FILE_TOO_LARGE", "A document image must be under 8 MB.", Map.of(), req));
+    }
+
+    /** A request that left a required part out is malformed, not a server defect. */
+    @ExceptionHandler({MissingServletRequestPartException.class,
+                       MissingServletRequestParameterException.class})
+    ResponseEntity<Map<String, Object>> handleMissingPart(Exception ex, HttpServletRequest req) {
+        return ResponseEntity.badRequest()
+                .body(body("VALIDATION_FAILED", "The request is missing a required part.",
+                        Map.of("reason", ex.getClass().getSimpleName()), req));
+    }
+
+    /**
+     * A reader that gives up mid-body is not a server fault. The phone closing an
+     * identity photograph it no longer needs leaves the socket gone, and anything this
+     * method returned would have to be written onto a response whose Content-Type is
+     * already image/jpeg -- which fails a second time and buries the first.
+     */
+    @ExceptionHandler({org.springframework.web.context.request.async.AsyncRequestNotUsableException.class,
+                       org.apache.catalina.connector.ClientAbortException.class})
+    void handleAborted(Exception ex, HttpServletRequest req) {
+        log.debug("{} was closed by the client before the body finished: {}",
+                req.getRequestURI(), ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

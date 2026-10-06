@@ -1,4 +1,4 @@
-# Digital Wallet & Payment System
+# Mela Wallet
 
 A multi-currency wallet with peer-to-peer transfers, double-entry bookkeeping, and
 real-time balance push. Spring Boot 3.5 on Java 17, Next.js 15 on React 19, MS SQL
@@ -97,6 +97,45 @@ Windows authentication enabled for the account that runs the commands.
    step exposes an editable field, if a `/api/` call errors, if the console shows an
    error, or if no transfer reference appears. `API_URL` and `CHROME_PATH` override the
    other ends; screenshots land in your system temp directory, never in the repo.
+
+## Deploying
+
+The two halves deploy separately: the client to Vercel, the API to Render as a Docker
+service (`Dockerfile` builds it, `render.yaml` describes it).
+
+**The database does not move.** Every guarantee the ledger makes -- zero-sum postings,
+no overdraft at the ledger level, history that cannot be rewritten or deleted -- is
+enforced by SQL Server triggers and a `DENY` grant, and Render offers only PostgreSQL.
+So a hosted API points `DB_HOST` at a SQL Server instance you control (Azure SQL
+Database, a VPS running SQL Server, your own server with 1433 exposed). Migrating the
+invariants to another engine is a project of its own, not a connection string.
+
+The API reads, in order: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_APP_USER`,
+`DB_APP_PASSWORD`, `DB_MIGRATE_USER`, `DB_MIGRATE_PASSWORD`, `DB_POOL_MAX`,
+`JWT_KEY_ID_CURRENT`, `JWT_PRIVATE_KEY_CURRENT`, `JWT_PUBLIC_KEY_CURRENT`,
+`WALLET_REVIEWERS`, `CORS_ALLOWED_ORIGIN_PATTERNS`, `KYC_DOC_STORAGE_DIR`. `PORT` is the
+port it binds to, which Render sets by itself. Generate a signing key pair locally and
+paste the two base64 halves into the host:
+
+```
+node -e "const{generateKeyPairSync}=require('crypto');
+const{publicKey,privateKey}=generateKeyPairSync('rsa',{modulusLength:2048,
+publicKeyEncoding:{type:'spki',format:'der'},privateKeyEncoding:{type:'pkcs8',format:'der'}});
+console.log('JWT_PRIVATE_KEY_CURRENT='+privateKey.toString('base64'));
+console.log('JWT_PUBLIC_KEY_CURRENT='+publicKey.toString('base64'));"
+```
+
+Three things to know before this serves real balances:
+
+- Render's free plan hosts Node, Python and Rails only. A Docker service, which is what
+  a JVM is here, needs a paid instance, and 512 MB is close for Spring Boot plus
+  Hibernate -- move up if the service is killed while starting.
+- Identity photographs are written to `KYC_DOC_STORAGE_DIR`. Without a persistent disk
+  attached, that directory belongs to the container and every redeploy erases it,
+  leaving the review desk with images the database can name but no longer finds.
+- `WALLET_REVIEWERS` decides who may approve KYC. The local default,
+  `ops@wallet.local`, is a demo address; on a host it must be your own, and the account
+  behind it needs a password nobody can guess, because registration is open.
 
 ## Tests
 

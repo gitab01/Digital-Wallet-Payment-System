@@ -75,7 +75,7 @@ public class StatementService {
                 document.addPage(sheet);
 
                 try (PDPageContentStream stream = new PDPageContentStream(document, sheet)) {
-                    text(stream, PDType1Font.HELVETICA_BOLD, 14, 36, 792, "Digital Wallet - Account Statement");
+                    text(stream, PDType1Font.HELVETICA_BOLD, 14, 36, 792, "Mela Wallet - Account Statement");
                     text(stream, PDType1Font.HELVETICA, 9, 36, 776,
                             "Account holder: " + nullToEmpty(holderName)
                                     + "      Generated: " + TS.format(Instant.now()) + " UTC"

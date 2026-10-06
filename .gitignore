@@ -6,6 +6,10 @@
 # Generated SQL carries literal passwords in it.
 deploy/.provision.generated.sql
 
+# Identity scans the API writes to disk. Personal data, and the database already names
+# every file in it.
+backend/var/
+
 # Build output
 backend/target/
 frontend/.next/

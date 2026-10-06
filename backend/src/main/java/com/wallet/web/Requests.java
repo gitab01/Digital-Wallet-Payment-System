@@ -61,6 +61,10 @@ public final class Requests {
 
     public record DecisionRequest(boolean approve) {}
 
+    public record StatusRequest(@NotBlank @Size(max = 20) String status) {}
+
+    public record FreezeRequest(boolean frozen) {}
+
     public record ChangePinRequest(
             @NotBlank @Pattern(regexp = "^[0-9]{4}$") String currentPin,
             @NotBlank @Pattern(regexp = "^[0-9]{4}$") String newPin) {}

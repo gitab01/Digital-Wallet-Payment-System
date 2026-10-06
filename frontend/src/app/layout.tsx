@@ -5,12 +5,12 @@ import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: {
-    default: "Digital Wallet",
-    template: "%s · Digital Wallet",
+    default: "Mela Wallet",
+    template: "%s · Mela Wallet",
   },
   description:
     "Multi-currency wallet with double-entry ledger transfers, tiered limits and auditable statements.",
-  applicationName: "Digital Wallet",
+  applicationName: "Mela Wallet",
   robots: { index: false, follow: false },
 };
 

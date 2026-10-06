@@ -1,4 +1,4 @@
-# Digital Wallet — HTTP + WebSocket contract
+# Mela Wallet — HTTP + WebSocket contract
 
 Single source of truth for both the Spring Boot service and the Next.js client.
 If code and this file disagree, this file is right.
@@ -159,19 +159,114 @@ Excel opens it correctly.
 
 ## KYC
 
+`documentType` is one of `NATIONAL_ID`, `PASSPORT`, `DRIVING_LICENSE`. A national ID
+and a licence are read on both sides, so both images are required; a passport is
+verified from its single information page, so only `FRONT` is required.
+
 ### `GET /api/kyc`
 `{ "tier": 2, "status": "APPROVED", "submittedAt": "...", "reviewedAt": "...",
-   "documents": [ { "tier": 1, "documentType": "NATIONAL_ID", "last4": "4567",
-                    "status": "APPROVED", "submittedAt": "..." } ],
+   "documents": [ { "tier": 1, "recordId": 7, "documentType": "NATIONAL_ID", "last4": "4567",
+                    "status": "SUBMITTED", "submittedAt": "...",
+                    "sides": { "FRONT": 12, "BACK": null } } ],
    "limits": { ... }, "nextTier": 3 }`
+
+`sides` maps each side to the stored document id, or `null` when it has not been
+uploaded, which is what the client uses to decide whether to show a picker or a tick.
 
 ### `POST /api/kyc`
 Upgrade submission: `{ "documentType": "PASSPORT", "documentNumber": "...",
 "phone": "+251…", "dateOfBirth": "1996-04-02", "country": "ET" }` → `201`.
 
+### `POST /api/kyc/documents`
+`multipart/form-data`, authenticated, one file per call:
+
+| Part | Value |
+| --- | --- |
+| `side` | `FRONT` or `BACK` |
+| `file` | JPEG or PNG, at most 8 MB |
+
+Attaches the image to the caller's newest `SUBMITTED` submission; uploading a side
+that already exists replaces it. Response `201`:
+
+```json
+{ "id": 12, "recordId": 7, "side": "FRONT", "byteLength": 249113, "uploadedAt": "..." }
+```
+
+What is stored is not quite what was sent: the bytes are decoded and re-encoded as
+JPEG, capped at 1600px on the long edge. That removes EXIF (which carries the camera's
+GPS fix), removes anything appended after the image data, and means a review desk can
+never be served a file that is a valid image and a valid something else at once.
+Errors: `VALIDATION_FAILED`, `UNSUPPORTED_IMAGE` (400), `FILE_TOO_LARGE` (413),
+`NO_OPEN_SUBMISSION` (409), `RATE_LIMITED`.
+
+### `GET /api/kyc/documents/{id}/image`
+`image/jpeg`, `Cache-Control: no-store`. The owner of the submission, or a reviewer.
+Every read is audited, because an identity photograph is personal data and "who looked
+at it" has to be answerable.
+
 ### `POST /api/kyc/{id}/decision`
 Operations-only (`ROLE_REVIEWER`): `{ "approve": true }` → `200`. Drives tier and
 limits. Used to demo tiered limits locally.
+
+Approval is refused while a required side is missing: `DOCUMENTS_INCOMPLETE` (409),
+with the missing sides in `details`. A submission can therefore never be approved on
+the document number alone.
+
+## Operations console
+
+All `ROLE_REVIEWER`. A reviewer is an account whose e-mail is in `wallet.reviewers`;
+reviewers cannot approve their own submissions.
+
+### `GET /api/admin/kyc-queue`
+```json
+[ { "recordId": 7, "userId": 3, "tier": 1, "email": "a@b.co", "fullName": "...",
+    "documentType": "NATIONAL_ID", "last4": "4567", "submittedAt": "...",
+    "missing": ["BACK"], "duplicateOfUserId": null, "ownSubmission": false } ]
+```
+
+`duplicateOfUserId` is set when another customer has already filed a scan with the
+same pixel content — the shape of an identity farm, and the reason the review desk
+needs to see the images rather than only the numbers.
+
+### `GET /api/admin/clients?query=&status=&page=&size=`
+`query` matches an e-mail or name fragment. Balances are per currency, never summed
+across them.
+
+```json
+{ "items": [ { "id": 3, "email": "a@b.co", "fullName": "...", "kycTier": 1,
+               "status": "ACTIVE", "withdrawalsFrozen": false, "createdAt": "...",
+               "wallets": [ { "currency": "ETB", "balance": "757.07" } ] } ],
+  "total": 41, "page": 0, "size": 20 }
+```
+
+### `GET /api/admin/clients/{id}`
+The whole customer in one read: `{ "user": { ...as above, "failedPinAttempts": 0,
+"pinLockedUntil": null }, "wallets": [...], "limits": { ... }, "kyc": [ ...submissions
+with their `sides`... ], "recent": [ ...transaction rows... ] }`.
+
+### `POST /api/admin/clients/{id}/status`
+`{ "status": "SUSPENDED" }` or `{ "status": "ACTIVE" }` → `200` the user view.
+A suspended account cannot sign in or move money.
+
+### `POST /api/admin/clients/{id}/withdrawal-freeze`
+`{ "frozen": true }` → `200`. Stops cash-out while leaving transfers and top-ups
+working, which is the narrower response to a suspicious but unproven account.
+
+### `POST /api/admin/clients/{id}/pin-unlock`
+→ `204`. Clears a PIN lockout for a customer who has proven themselves out of band.
+
+### `GET /api/admin/audit?action=&page=&size=`
+`{ "items": [ { "id": 991, "userEmail": "a@b.co", "action": "KYC_DOCUMENT_VIEWED",
+"outcome": "SUCCESS", "ipAddress": "0:0:0:0:0:0:0:1", "createdAt": "...",
+"detail": "document 12" } ], "total": 991, "page": 0, "size": 50 }`
+
+### `POST /api/admin/reconcile?repair=false`
+Runs the ledger proof on demand; `repair=true` moves a projection to match the ledger.
+
+`GET /api/admin/kyc/{recordId}/documents` returns the images attached to a submission
+`[{ "id": 12, "side": "FRONT", "byteLength": 249113, "uploadedAt": "..." }]`, and a
+reviewer fetches the bytes from the same
+`GET /api/kyc/documents/{id}/image` route the owner uses.
 
 ## Security settings
 

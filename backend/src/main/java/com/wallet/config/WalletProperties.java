@@ -18,6 +18,7 @@ public class WalletProperties {
     private final RateLimit rateLimit = new RateLimit();
     private final Anomaly anomaly = new Anomaly();
     private final Reconciliation reconciliation = new Reconciliation();
+    private final Documents documents = new Documents();
 
     /** E-mail addresses allowed to approve KYC. Empty means no reviewer endpoint is usable. */
     private List<String> reviewers = new ArrayList<>();
@@ -28,6 +29,7 @@ public class WalletProperties {
     public RateLimit getRateLimit() { return rateLimit; }
     public Anomaly getAnomaly() { return anomaly; }
     public Reconciliation getReconciliation() { return reconciliation; }
+    public Documents getDocuments() { return documents; }
     public List<String> getReviewers() { return reviewers; }
     public void setReviewers(List<String> reviewers) { this.reviewers = reviewers; }
 
@@ -36,7 +38,7 @@ public class WalletProperties {
     }
 
     public static class Jwt {
-        private String issuer = "digital-wallet";
+        private String issuer = "mela-wallet";
         private Duration accessTtl = Duration.ofMinutes(15);
         private Duration refreshTtl = Duration.ofDays(30);
         private String keyIdCurrent = "key-2";
@@ -95,6 +97,7 @@ public class WalletProperties {
         private int transferPerMinute = 4;
         private int quotePerMinute = 30;
         private int generalPerMinute = 120;
+        private int documentsPerMinute = 12;
 
         public int getLoginPerMinute() { return loginPerMinute; }
         public void setLoginPerMinute(int v) { this.loginPerMinute = v; }
@@ -108,6 +111,8 @@ public class WalletProperties {
         public void setQuotePerMinute(int v) { this.quotePerMinute = v; }
         public int getGeneralPerMinute() { return generalPerMinute; }
         public void setGeneralPerMinute(int v) { this.generalPerMinute = v; }
+        public int getDocumentsPerMinute() { return documentsPerMinute; }
+        public void setDocumentsPerMinute(int v) { this.documentsPerMinute = v; }
     }
 
     public static class Anomaly {
@@ -134,5 +139,19 @@ public class WalletProperties {
 
         public String getCron() { return cron; }
         public void setCron(String cron) { this.cron = cron; }
+    }
+
+    /** Identity document scans. Bytes on disk, provenance in the database. */
+    public static class Documents {
+        private String storageDir = "./var/kyc-documents";
+        private int maxBytes = 8 * 1024 * 1024;
+        private int maxEdge = 1600;
+
+        public String getStorageDir() { return storageDir; }
+        public void setStorageDir(String v) { this.storageDir = v; }
+        public int getMaxBytes() { return maxBytes; }
+        public void setMaxBytes(int v) { this.maxBytes = v; }
+        public int getMaxEdge() { return maxEdge; }
+        public void setMaxEdge(int v) { this.maxEdge = v; }
     }
 }

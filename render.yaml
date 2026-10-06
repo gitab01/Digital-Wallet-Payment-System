@@ -1,0 +1,76 @@
+# Render blueprint for the wallet API.
+#
+# Render builds this repository's Dockerfile and runs the jar it produces. Render's free
+# plan does not host Docker or JVM services, so the instance below is the cheapest paid
+# one; the database is NOT created here, because this service's guarantees live in SQL
+# Server triggers and Render offers only PostgreSQL. Point DB_HOST at a SQL Server
+# instance you control (see README, "Deploying").
+#
+# Every secret is sync: false, which means Render asks for its value when the blueprint
+# is created and the value never enters this file or the repository.
+
+services:
+  - type: web
+    name: wallet-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # 0.5 CPU / 512 MB. The JVM fits (heap is capped at 75% of the container), but it is
+    # close: if the service is killed while starting, move to 1c-2g.
+    plan: 0.5c-512mb
+    # Closest region to Addis Ababa.
+    region: frankfurt
+    healthCheckPath: /actuator/health
+
+    envVars:
+      # --- database: a SQL Server you own, reachable from the internet over 1433 ---
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "1433"
+      - key: DB_NAME
+        value: wallet_db
+      # The runtime login holds no DDL and no UPDATE or DELETE on the ledger.
+      - key: DB_APP_USER
+        value: wallet_app
+      - key: DB_APP_PASSWORD
+        sync: false
+      # Flyway's login owns the schema and runs the migrations at startup.
+      - key: DB_MIGRATE_USER
+        value: wallet_migrate
+      - key: DB_MIGRATE_PASSWORD
+        sync: false
+      # Azure SQL's cheapest tier caps concurrent connections; keep well under it.
+      - key: DB_POOL_MAX
+        value: "8"
+
+      # --- token signing: RS256, base64 PKCS#8 and SPKI, one line each ---
+      - key: JWT_KEY_ID_CURRENT
+        value: key-1
+      - key: JWT_PRIVATE_KEY_CURRENT
+        sync: false
+      - key: JWT_PUBLIC_KEY_CURRENT
+        sync: false
+
+      # --- who may decide KYC submissions ---
+      # Comma-separated addresses. Leave this unset and the decision endpoint is closed.
+      - key: WALLET_REVIEWERS
+        sync: false
+
+      # --- the deployed client's origin, so its browser may call this API ---
+      - key: CORS_ALLOWED_ORIGIN_PATTERNS
+        value: http://localhost:3000,http://localhost:3210,https://*.vercel.app
+
+      # Identity scans are written to disk. Without a persistent disk that directory is
+      # part of the container, so a redeploy erases every photograph and the review desk
+      # shows a broken image. See the note at the end of this file.
+      - key: KYC_DOC_STORAGE_DIR
+        value: /app/var/kyc-documents
+
+# To keep the photographs across a redeploy, add this as a sibling of envVars (Render
+# attaches disks to paid services):
+#
+#     disk:
+#       - name: kyc-documents
+#         mountPath: /app/var/kyc-documents
+#         sizeGB: 1
+

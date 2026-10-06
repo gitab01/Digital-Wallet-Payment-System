@@ -30,4 +30,15 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     @Modifying
     @Query("DELETE FROM RefreshToken t WHERE t.expiresAt < :cutoff")
     int deleteExpired(@Param("cutoff") Instant cutoff);
+
+    /**
+     * Suspension has to reach the sessions that are already open, or a frozen account
+     * keeps transacting until its tokens happen to expire.
+     */
+    @Modifying
+    @Query("""
+            UPDATE RefreshToken t SET t.revokedAt = CURRENT_TIMESTAMP
+            WHERE t.userId = :userId AND t.revokedAt IS NULL
+            """)
+    int revokeAllForUser(@Param("userId") Long userId);
 }

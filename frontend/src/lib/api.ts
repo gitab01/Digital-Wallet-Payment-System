@@ -1,18 +1,30 @@
 import { ApiError, parseEnvelope } from "./errors";
 import { API_ORIGIN, STORAGE_KEYS } from "./config";
 import type {
+  AdminAuditEvent,
+  AdminClientDetail,
+  AdminClientRow,
+  AdminClientStatus,
+  AdminClientUser,
   ApiErrorEnvelope,
   AuditPage,
+  AuditQuery,
   AuthResponse,
   ChangePinRequest,
+  ClientListQuery,
+  DocumentSide,
   DownloadedFile,
   FundingRequest,
+  KycDocumentSummary,
+  KycDocumentUpload,
+  KycQueueEntry,
   KycUpgradeRequest,
   KycView,
   LoginRequest,
   Page,
   PublicUser,
   QuoteQuery,
+  ReconcileReport,
   RegisterRequest,
   StatementQuery,
   Tokens,
@@ -60,9 +72,16 @@ function accessToken(): string | null {
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  /**
+   * Multipart body for `POST /api/kyc/documents`. Never paired with `body`: the
+   * browser must set Content-Type itself, with the boundary, so we send no header.
+   */
+  form?: FormData;
   query?: Record<string, string | number | undefined | null>;
   /** Attach the bearer token. Defaults to true. */
   auth?: boolean;
+  /** Overrides `Accept` for routes that return bytes rather than JSON. */
+  accept?: string;
   session?: SessionPolicy;
   signal?: AbortSignal;
 }
@@ -86,12 +105,16 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 }
 
 async function send(path: string, opts: RequestOptions): Promise<Response> {
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const headers: Record<string, string> = { Accept: opts.accept ?? "application/json" };
   const token = opts.auth === false ? null : accessToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const init: RequestInit = { method: opts.method ?? "GET", headers, cache: "no-store" };
-  if (opts.body !== undefined) {
+  if (opts.form) {
+    // Deliberately no Content-Type here: a hand-written one has no boundary and
+    // the server can then not split the parts at all.
+    init.body = opts.form;
+  } else if (opts.body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(opts.body);
   }
@@ -184,6 +207,25 @@ async function requestJson<T>(path: string, opts: RequestOptions = {}): Promise<
       message: "Response body was not JSON",
     });
   }
+}
+
+/**
+ * Bytes rather than JSON: an identity image can only be shown with the
+ * Authorization header attached, so a plain `<img src>` cannot be used.
+ */
+async function requestBlob(path: string, opts: RequestOptions = {}): Promise<Blob> {
+  const { res, envelope } = await requestRaw(path, { accept: "image/jpeg", ...opts });
+  if (!res.ok) {
+    throw errorFrom(
+      res,
+      envelope ?? {
+        code: "UNEXPECTED_RESPONSE",
+        message: `Image request failed with status ${res.status}`,
+        details: null,
+      },
+    );
+  }
+  return res.blob();
 }
 
 /* ------------------------------------------------------------------- auth -- */
@@ -376,11 +418,101 @@ export function submitKycUpgrade(body: KycUpgradeRequest): Promise<KycView> {
   return requestJson<KycView>("/api/kyc", { method: "POST", body });
 }
 
-/** Operations-only (`ROLE_REVIEWER`). No screen in this client drives it. */
+/**
+ * `POST /api/kyc/documents` — one side per call, attached to the caller's newest
+ * SUBMITTED submission. A silent policy is right here: it changes no money, and a
+ * token that expires mid-upload should replay rather than interrupt onboarding.
+ */
+export function uploadKycDocument(side: DocumentSide, file: File): Promise<KycDocumentUpload> {
+  const form = new FormData();
+  form.append("side", side);
+  form.append("file", file, file.name);
+  return requestJson<KycDocumentUpload>("/api/kyc/documents", {
+    method: "POST",
+    form,
+  });
+}
+
+/**
+ * The bytes behind one stored document. Every server-side read of this route is
+ * audited, which is how "who looked at this customer's ID" stays answerable.
+ */
+export function getKycDocumentImage(id: number, signal?: AbortSignal): Promise<Blob> {
+  return requestBlob(`/api/kyc/documents/${id}/image`, { signal });
+}
+
+/** Operations-only (`ROLE_REVIEWER`). Drives tier and limits. */
 export function decideKycSubmission(id: number, approve: boolean): Promise<KycView> {
   return requestJson<KycView>(`/api/kyc/${id}/decision`, {
     method: "POST",
     body: { approve },
+  });
+}
+
+/* ------------------------------------------------------ operations console -- */
+
+/**
+ * Every route below is `ROLE_REVIEWER` at the server. The session policy stays
+ * `silent` so an expired token refreshes, but a genuine 403 is not a session
+ * problem and must reach the page as an error it can explain.
+ */
+export function getKycQueue(signal?: AbortSignal): Promise<KycQueueEntry[]> {
+  return requestJson<KycQueueEntry[]>("/api/admin/kyc-queue", { signal });
+}
+
+export function getKycRecordDocuments(recordId: number, signal?: AbortSignal): Promise<KycDocumentSummary[]> {
+  return requestJson<KycDocumentSummary[]>(`/api/admin/kyc/${recordId}/documents`, { signal });
+}
+
+export function listClients(
+  query: ClientListQuery,
+  signal?: AbortSignal,
+): Promise<Page<AdminClientRow>> {
+  return requestJson<Page<AdminClientRow>>("/api/admin/clients", {
+    query: { query: query.query, status: query.status, page: query.page, size: query.size },
+    signal,
+  });
+}
+
+export function getClient(id: number, signal?: AbortSignal): Promise<AdminClientDetail> {
+  return requestJson<AdminClientDetail>(`/api/admin/clients/${id}`, { signal });
+}
+
+/** A suspended account cannot sign in or move money — the UI confirms first. */
+export function setClientStatus(id: number, status: AdminClientStatus): Promise<AdminClientUser> {
+  return requestJson<AdminClientUser>(`/api/admin/clients/${id}/status`, {
+    method: "POST",
+    body: { status },
+  });
+}
+
+/** Narrower than suspension: cash-out stops, transfers and top-ups keep working. */
+export function setClientWithdrawalFreeze(id: number, frozen: boolean): Promise<void> {
+  return requestJson<void>(`/api/admin/clients/${id}/withdrawal-freeze`, {
+    method: "POST",
+    body: { frozen },
+  });
+}
+
+export function unlockClientPin(id: number): Promise<void> {
+  return requestJson<void>(`/api/admin/clients/${id}/pin-unlock`, { method: "POST" });
+}
+
+export function listAdminAudit(query: AuditQuery, signal?: AbortSignal): Promise<Page<AdminAuditEvent>> {
+  return requestJson<Page<AdminAuditEvent>>("/api/admin/audit", {
+    query: { action: query.action, page: query.page, size: query.size },
+    signal,
+  });
+}
+
+/**
+ * `repair=true` moves a projection to match the ledger, so the caller asks for it
+ * through its own separate confirmation — the same button never does both.
+ */
+export function reconcile(repair: boolean): Promise<ReconcileReport> {
+  return requestJson<ReconcileReport>("/api/admin/reconcile", {
+    method: "POST",
+    query: { repair: repair ? "true" : "false" },
   });
 }
 
@@ -487,17 +619,37 @@ export function storeUser(user: PublicUser | null): void {
   }
 }
 
-/** Cheap, non-authoritative expiry claim check on the JWT `exp`. */
-export function tokenExpiryMs(tokens: Tokens | null): number | null {
-  if (!tokens?.accessToken) return null;
-  const [, payload] = tokens.accessToken.split(".");
+/**
+ * Claims read without verifying the signature. Cheap and deliberately
+ * non-authoritative: it exists to decide what to show, never what to allow.
+ */
+function jwtPayload(token: string | null | undefined): Record<string, unknown> | null {
+  if (!token) return null;
+  const [, payload] = token.split(".");
   if (!payload) return null;
   try {
-    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as {
-      exp?: number;
-    };
-    return typeof json.exp === "number" ? json.exp * 1000 : null;
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as Record<
+      string,
+      unknown
+    >;
   } catch {
     return null;
   }
+}
+
+/** Cheap, non-authoritative expiry claim check on the JWT `exp`. */
+export function tokenExpiryMs(tokens: Tokens | null): number | null {
+  const exp = jwtPayload(tokens?.accessToken)?.exp;
+  return typeof exp === "number" ? exp * 1000 : null;
+}
+
+/**
+ * The JWT `roles` claim. Used only to decide whether to offer the operations
+ * console at all — `ROLE_REVIEWER` is still enforced on every admin route, so a
+ * tampered claim gets a 403 here rather than a decision.
+ */
+export function tokenRoles(accessToken: string | null | undefined): string[] {
+  const claim = jwtPayload(accessToken)?.roles;
+  if (Array.isArray(claim)) return claim.filter((role): role is string => typeof role === "string");
+  return typeof claim === "string" ? [claim] : [];
 }
