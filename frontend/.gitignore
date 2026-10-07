@@ -11,4 +11,9 @@ yarn-error.log*
 .vercel
 
 .vercel
+
+# .env.production is the exception, and only it: it carries nothing but the public API
+# origin, which the browser sees anyway and which the build must read from the repository.
+# .env.local and the rest stay ignored.
 .env*
+!.env.production

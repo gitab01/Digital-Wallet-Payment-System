@@ -128,25 +128,53 @@ console.log('JWT_PUBLIC_KEY_CURRENT='+publicKey.toString('base64'));"
 
 In order, because the service will not start without its database:
 
-1. **Provision the SQL Server.** `deploy/provision.mjs` is written for the local
-   Windows-auth instance, so against a remote server run its statements yourself as a
-   sysadmin: two logins (`wallet_migrate`, `wallet_app`), a `wallet_runtime` role per
-   database, `db_owner` for the migrator and `wallet_runtime` for the runtime login. The
+1. **Create the database on Azure SQL.** One logical server, one database named
+   `wallet_db`, in the region Render runs in, on the **Basic tier (5 DTU, a few dollars a
+   month)**. Choose Basic over the serverless tiers deliberately: this API holds an idle
+   connection pool, which keeps serverless compute awake and burns its monthly free
+   allowance in days, and a paused database resumes far more slowly than the health check
+   allows, so Render would restart the container mid-resume. Under Networking, allow your
+   own public IP for now and keep "Deny public network access" off.
+2. **Provision the logins and roles.** `deploy/provision.mjs` is written for the local
+   Windows-auth instance, so against Azure run:
+
+   ```
+   node deploy/provision-azure.mjs --server <logical-server>.database.windows.net --admin <server-admin>
+   ```
+
+   It creates the two logins in `master`, their users in `wallet_db`, the `wallet_runtime`
+   role, and `db_owner` for the migrator, reusing the passwords already in `backend/.env`
+   so no credential is typed or printed; sqlcmd asks for the admin password itself. Use
+   long random passwords, because port 1433 is reachable from the internet by design. The
    table grants and the append-only `DENY` are not yours to write -- they arrive with
-   migration `V3` when the API first starts. Use long random passwords; the port is
-   reachable from the internet by design.
-2. **Create the Render service.** Dashboard -> New -> Blueprint, connect this
+   migration `V3` when the API first starts.
+3. **Create the Render service.** Dashboard -> New -> Blueprint, connect this
    repository, choose the branch, and Render reads `render.yaml`. It asks for the values
    marked `sync: false` there: `DB_HOST`, `DB_APP_PASSWORD`, `DB_MIGRATE_PASSWORD`,
    `JWT_PRIVATE_KEY_CURRENT`, `JWT_PUBLIC_KEY_CURRENT`, `WALLET_REVIEWERS`. Nothing else
-   needs typing.
-3. **Check it is alive.** `https://<the service's url>/actuator/health` must answer
+   needs typing. The hostname is derived from the service name in `render.yaml`, so this
+   one answers at `wallet-backend.onrender.com`, or a suffixed variant of it if that name
+   is taken -- never at a domain carrying the product's name. Read the URL from the
+   service's Overview page rather than assuming it.
+4. **Let Render through the firewall.** The service's Environment page lists its outbound
+   addresses; add them to the Azure SQL server's firewall rules. Until you do, the
+   container starts, Flyway cannot connect, and the log says `TCP error: 10060` while the
+   dashboard still calls the state "Configuring".
+5. **Check it is alive.** `https://<the service's url>/actuator/health` must answer
    `UP`. The first boot runs Flyway V1..V5 and takes a couple of minutes; if the
    instance is killed mid-start it is short of memory, not broken.
-4. **Point the client at it and promote.** From `frontend/`:
-   `vercel env add NEXT_PUBLIC_API_BASE_URL production`, then
-   `vercel deploy --prod`. The URL is baked in at build time, so a change to it means a
-   new deployment, not a restart.
+6. **Point the client at it and promote.** The production API origin is committed in
+   `frontend/.env.production` -- it is public information, the browser sends it in every
+   request -- and `frontend/vercel.json` pins `framework: nextjs`, because a project made
+   with `vercel project add` starts on the `Other` preset and dies after a full build
+   complaining that no output directory named `public` exists. From `frontend/`:
+   `vercel deploy --prod`. An environment variable of the same name on the Vercel project
+   overrides the file, which is how you change the target without a commit.
+   The URL is baked in at build time, so a change to it means a new deployment, not a
+   restart -- and if it names a host that does not answer, the symptom is a sign-in that
+   spins and never completes, not an error page. Check the API's `/actuator/health`
+   before you build the client against it. The deployed client is at
+   `https://mela-wallet.vercel.app`.
 
 Three things to know before this serves real balances:
 
