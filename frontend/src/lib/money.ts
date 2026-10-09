@@ -59,7 +59,9 @@ export function formatAmount(
   const cents = centsOf(amount);
   if (cents === null) return null;
   const negative = cents < 0n;
-  const absolute = (negative ? -cents : cents).toString();
+  // Pad before the split: "0" would otherwise give a whole part of "0" and a
+  // fractional part of "0", so zero renders as "0.0" and five cents as "0.5".
+  const absolute = (negative ? -cents : cents).toString().padStart(3, "0");
   const whole = absolute.slice(0, -2) || "0";
   const frac = absolute.slice(-2);
   const value = `${groupThousands(whole)}.${frac}`;
