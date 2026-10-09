@@ -61,7 +61,7 @@ export function VerifiedChip({ account }: { account: Pick<WalletAccount, "reconc
         }
       >
         <Dot tone="positive" />
-        Verified
+        Proved
       </Chip>
     );
   }

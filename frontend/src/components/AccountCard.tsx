@@ -2,23 +2,26 @@
 
 import Link from "next/link";
 
-import type { Money, WalletAccount } from "@/lib/types";
+import type { WalletAccount } from "@/lib/types";
 import { formatDateTime } from "@/lib/money";
 import { Amount, AmountBare } from "@/components/ui/Amount";
 import { Button } from "@/components/ui/Button";
 import { VerifiedChip } from "@/components/ui/Chip";
 import { Icon } from "@/components/ui/Icon";
 
+/**
+ * One currency wallet. The daily limit is deliberately absent: it belongs to the
+ * customer and is identical on every card, so repeating it three times only says the
+ * same thing in three places.
+ */
 export function AccountCard({
   account,
-  remainingToday,
   allowsWithdrawal,
   withdrawalsFrozen,
   onDeposit,
   onWithdraw,
 }: {
   account: WalletAccount;
-  remainingToday: Money;
   allowsWithdrawal: boolean;
   withdrawalsFrozen: boolean;
   onDeposit: () => void;
@@ -44,29 +47,22 @@ export function AccountCard({
 
         <div className="mt-5">
           <Amount value={account.balance} currency={account.currency} size="xl" />
-          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-label text-ink-faint">
-            {reserved ? (
-              <span>
-                Available{" "}
-                <AmountBare value={account.available} className="text-ink-muted" />
-              </span>
-            ) : (
-              <span>Fully available</span>
-            )}
-            <span aria-hidden="true">·</span>
-            <span>
-              Daily remaining <AmountBare value={remainingToday} className="text-ink-muted" />
-            </span>
-          </p>
-          <p className="mt-1 text-label text-ink-faint">
-            {account.reconciled
-              ? `Proved against the ledger ${account.verifiedAt ? formatDateTime(account.verifiedAt) : "recently"}`
-              : "Awaiting the next ledger proof"}
-          </p>
+          {reserved ? (
+            <p className="mt-2 text-label text-ink-faint">
+              Available{" "}
+              <AmountBare value={account.available} className="text-ink-muted" /> · the rest is
+              held by an in-flight movement
+            </p>
+          ) : null}
+          {account.reconciled ? (
+            <p className="mt-1 text-label text-ink-faint">
+              Proved against the ledger {account.verifiedAt ? formatDateTime(account.verifiedAt) : "recently"}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="mt-5 flex flex-wrap items-center gap-2">
         <Link
           href={`/transfer?currency=${encodeURIComponent(account.currency)}`}
           className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-label font-medium uppercase tracking-wide text-white transition-colors hover:bg-white hover:text-ink"
@@ -77,9 +73,8 @@ export function AccountCard({
         <Button size="sm" variant="secondary" onClick={onDeposit}>
           Add money
         </Button>
-        <Button
-          size="sm"
-          variant="secondary"
+        <button
+          type="button"
           onClick={onWithdraw}
           disabled={!canWithdraw}
           title={
@@ -89,12 +84,13 @@ export function AccountCard({
                 ? "Withdrawals are frozen on this profile"
                 : undefined
           }
+          className="inline-flex h-9 shrink-0 items-center rounded-md px-2 text-label font-medium uppercase tracking-wide text-ink-muted underline-offset-4 hover:text-ink hover:underline disabled:text-ink-faint/60 disabled:no-underline"
         >
           Withdraw
-        </Button>
+        </button>
         <Link
           href={`/statement?accountId=${account.id}`}
-          className="inline-flex h-9 shrink-0 items-center rounded-md border border-transparent px-2 text-label font-medium uppercase tracking-wide text-ink-muted hover:text-ink"
+          className="inline-flex h-9 shrink-0 items-center rounded-md px-2 text-label font-medium uppercase tracking-wide text-ink-muted underline-offset-4 hover:text-ink hover:underline"
         >
           Statement
         </Link>

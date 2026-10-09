@@ -139,7 +139,7 @@ export default function HistoryPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <p className="num text-label text-ink-faint">
-              {loading ? "Loading movements…" : `${total} movement${total === 1 ? "" : "s"} match these filters`}
+              {loading ? "Loading movements…" : `${total} of your movements match these filters`}
             </p>
             <Button
               size="sm"

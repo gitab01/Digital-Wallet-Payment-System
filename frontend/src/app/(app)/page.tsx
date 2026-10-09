@@ -103,8 +103,6 @@ export default function WalletHomePage() {
           </Callout>
         ) : null}
 
-        {limits ? <DailyCapacity limits={limits} tier={data?.tier ?? null} /> : null}
-
         {data && data.accounts.length === 0 ? (
           <EmptyState
             title="No currency wallets yet"
@@ -123,7 +121,6 @@ export default function WalletHomePage() {
               <AccountCard
                 key={account.id}
                 account={account}
-                remainingToday={limits?.remainingToday ?? "0.00"}
                 allowsWithdrawal={limits?.allowsWithdrawal ?? false}
                 withdrawalsFrozen={data.withdrawalsFrozen}
                 onDeposit={() => setFunding({ mode: "deposit", account })}
@@ -132,6 +129,8 @@ export default function WalletHomePage() {
             ))}
           </div>
         ) : null}
+
+        {limits ? <DailyCapacity limits={limits} tier={data?.tier ?? null} /> : null}
 
         <Panel
           title="Recent activity"
