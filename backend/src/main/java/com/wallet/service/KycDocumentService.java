@@ -12,12 +12,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -58,9 +61,11 @@ public class KycDocumentService {
 
     /** The sides this submission still has to be given before it can be approved. */
     public List<String> missingSides(KycRecord record) {
-        Set<String> present = docs.findByRecordIdOrderBySideAsc(record.getId()).stream()
-                .map(d -> d.getSide().name())
-                .collect(Collectors.toSet());
+        return missingSides(record, docs.findByRecordIdOrderBySideAsc(record.getId()));
+    }
+
+    private static List<String> missingSides(KycRecord record, List<KycDocument> filed) {
+        Set<String> present = filed.stream().map(d -> d.getSide().name()).collect(Collectors.toSet());
         return requiredSides(record.getDocumentType()).stream()
                 .filter(side -> !present.contains(side))
                 .toList();
@@ -136,17 +141,53 @@ public class KycDocumentService {
         return byRecord;
     }
 
+    /** What the review queue shows per submission: the sides still owed, and a reused image. */
+    public record QueueFacts(List<String> missingSides, Long duplicateOfUserId) {
+        static final QueueFacts COMPLETE = new QueueFacts(List.of(), null);
+    }
+
     /**
-     * Another customer's submission carrying an identical image. Reported, never
+     * Both queue facts for a page of submissions, in two queries rather than four apiece.
+     *
+     * Another customer's submission carrying an identical image is reported, never
      * blocked: the honest reading is "look closely at this one", and a legitimate
-     * re-filing of the same physical document by the same person is not a fraud.
+     * re-filing of the same physical document by the same person is not a fraud. The
+     * owner named is the lowest user id among them, because the desk re-reads the same
+     * queue and a figure that moves between two looks is a figure nobody trusts.
      */
-    public Long duplicateOf(KycRecord record) {
-        for (KycDocument doc : docs.findByRecordIdOrderBySideAsc(record.getId())) {
-            List<Long> others = docs.otherUsersWithSameImage(doc.getPixelHash(), record.getUserId());
-            if (!others.isEmpty()) return others.get(0);
+    public Map<Long, QueueFacts> factsFor(Collection<KycRecord> open) {
+        if (open.isEmpty()) return Map.of();
+
+        Map<Long, List<KycDocument>> filedBy = new HashMap<>();
+        for (KycDocument doc : docs.findByRecordIdIn(open.stream().map(KycRecord::getId).toList())) {
+            filedBy.computeIfAbsent(doc.getRecordId(), k -> new ArrayList<>()).add(doc);
         }
-        return null;
+
+        Set<String> hashes = filedBy.values().stream().flatMap(List::stream)
+                .map(KycDocument::getPixelHash).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<String, Set<Long>> ownersOf = new HashMap<>();
+        if (!hashes.isEmpty()) {
+            for (KycDocumentRepository.ImageOwner owner : docs.usersByImageHash(hashes)) {
+                ownersOf.computeIfAbsent(owner.getPixelHash(), k -> new HashSet<>()).add(owner.getUserId());
+            }
+        }
+
+        Map<Long, QueueFacts> facts = new HashMap<>();
+        for (KycRecord record : open) {
+            List<KycDocument> images = filedBy.getOrDefault(record.getId(), List.of());
+            Long duplicate = images.stream()
+                    .map(image -> firstOwnerExcept(ownersOf.get(image.getPixelHash()), record.getUserId()))
+                    .filter(Objects::nonNull)
+                    .min(Long::compare)
+                    .orElse(null);
+            facts.put(record.getId(), new QueueFacts(missingSides(record, images), duplicate));
+        }
+        return facts;
+    }
+
+    private static Long firstOwnerExcept(Set<Long> owners, Long exceptUserId) {
+        if (owners == null) return null;
+        return owners.stream().filter(id -> !id.equals(exceptUserId)).min(Long::compare).orElse(null);
     }
 
     private static KycDocument.Side parseSide(String raw) {

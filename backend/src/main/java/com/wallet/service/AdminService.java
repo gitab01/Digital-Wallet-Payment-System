@@ -102,15 +102,18 @@ public class AdminService {
     public List<QueueItem> queue(Long reviewerId) {
         List<KycRecord> open = records.findByStatusOrderByIdAsc(KycRecord.Status.SUBMITTED);
         Map<Long, User> people = usersById(open.stream().map(KycRecord::getUserId).toList());
+        Map<Long, KycDocumentService.QueueFacts> facts = documents.factsFor(open);
 
         List<QueueItem> items = new ArrayList<>();
         for (KycRecord record : open) {
             User subject = people.get(record.getUserId());
+            KycDocumentService.QueueFacts fact =
+                    facts.getOrDefault(record.getId(), KycDocumentService.QueueFacts.COMPLETE);
             items.add(new QueueItem(record.getId(), record.getUserId(), record.getTier(),
                     subject == null ? "?" : subject.getEmail(),
                     subject == null ? "deleted account" : subject.getFullName(),
                     record.getDocumentType(), record.getDocumentLast4(), record.getSubmittedAt(),
-                    documents.missingSides(record), documents.duplicateOf(record),
+                    fact.missingSides(), fact.duplicateOfUserId(),
                     record.getUserId().equals(reviewerId)));
         }
         return items;
