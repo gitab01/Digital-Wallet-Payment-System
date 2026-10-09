@@ -45,6 +45,17 @@ export class ApiError extends Error {
   get isNetworkError(): boolean {
     return this.code === "NETWORK_ERROR";
   }
+
+  /**
+   * True when we stopped waiting on a request that changes state. The server may still
+   * commit it, so nothing that reads this may promise the money did not move.
+   */
+  get outcomeIsUnknown(): boolean {
+    return (
+      this.code === "NETWORK_ERROR" &&
+      (this.details as { outcome?: string } | null)?.outcome === "unknown"
+    );
+  }
 }
 
 function asNumber(details: Record<string, unknown> | null, key: string): number | null {
@@ -164,8 +175,16 @@ export function describeError(err: unknown, fallbackContext?: string): string {
         ? `Please correct the form: ${fieldError}`
         : "Please correct the highlighted fields and try again.";
     }
-    case "NETWORK_ERROR":
-      return "We could not reach the service. Check your connection — nothing has been moved.";
+    case "NETWORK_ERROR": {
+      if (asString(d, "reason") !== "timeout") {
+        return "We could not reach the service. Check your connection — nothing has been moved.";
+      }
+      // A write that ran out of patience has an unknown result, and saying so is the
+      // only honest thing left: the server may commit right after we stop listening.
+      return asString(d, "outcome") === "unknown"
+        ? "We stopped waiting for an answer, so this may already have gone through. Check your history before you send it again — the same key means a retry cannot pay twice."
+        : "The service is taking too long to answer, so it is most likely starting up or asleep. Try again in a moment — nothing has been moved.";
+    }
     case "UNEXPECTED_RESPONSE":
       return "The service returned something unexpected, so we stopped. Nothing has been moved.";
     default:

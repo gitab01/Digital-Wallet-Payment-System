@@ -57,6 +57,8 @@ export function TransferWizard() {
   const [submitting, setSubmitting] = useState(false);
   const [submitFailure, setSubmitFailure] = useState<string | null>(null);
   const [submitCode, setSubmitCode] = useState<ApiErrorCode | null>(null);
+  /** True when the request died without an answer: the transfer may exist anyway. */
+  const [submitUncertain, setSubmitUncertain] = useState(false);
   const [result, setResult] = useState<TransferResult | null>(null);
 
   /**
@@ -163,6 +165,7 @@ export function TransferWizard() {
     setSubmitting(true);
     setSubmitFailure(null);
     setSubmitCode(null);
+    setSubmitUncertain(false);
     try {
       const response = await createTransfer({
         toEmail: toEmail.trim(),
@@ -179,6 +182,7 @@ export function TransferWizard() {
     } catch (err) {
       setSubmitFailure(describeError(err, "Transfer"));
       setSubmitCode(err instanceof ApiError ? err.code : null);
+      setSubmitUncertain(err instanceof ApiError && err.outcomeIsUnknown);
     } finally {
       setSubmitting(false);
     }
@@ -195,6 +199,7 @@ export function TransferWizard() {
     setPinError(null);
     setSubmitFailure(null);
     setSubmitCode(null);
+    setSubmitUncertain(false);
     setResult(null);
     setEmailError(null);
     setAmountError(null);
@@ -445,12 +450,26 @@ export function TransferWizard() {
               />
 
               {submitFailure ? (
-                <Callout tone="error" title="This transfer was not completed" code={submitCode ?? undefined}>
+                <Callout
+                  tone="error"
+                  title={submitUncertain ? "We did not get an answer" : "This transfer was not completed"}
+                  code={submitCode ?? undefined}
+                >
                   {submitFailure}
                   <p className="text-ink-faint">
-                    {isRetrySafeCode(submitCode)
-                      ? "Re-sending this attempt is safe: it carries the same idempotency key, so the server will not move the money twice."
-                      : "Sending it again as it stands will be refused again — change what the message above asks for first."}
+                    {submitUncertain ? (
+                      <>
+                        Check{" "}
+                        <Link href="/history" className="underline decoration-line hover:decoration-ink">
+                          History
+                        </Link>{" "}
+                        for this amount before you send it again. If it is there, it moved.
+                      </>
+                    ) : isRetrySafeCode(submitCode) ? (
+                      "Re-sending this attempt is safe: it carries the same idempotency key, so the server will not move the money twice."
+                    ) : (
+                      "Sending it again as it stands will be refused again — change what the message above asks for first."
+                    )}
                   </p>
                 </Callout>
               ) : null}

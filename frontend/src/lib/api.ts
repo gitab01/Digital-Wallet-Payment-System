@@ -84,6 +84,12 @@ interface RequestOptions {
   accept?: string;
   session?: SessionPolicy;
   signal?: AbortSignal;
+  /**
+   * How long to wait for a response before giving up. A host that accepts the TCP
+   * connection and then answers nothing — Render sleeping, or a container stuck
+   * restarting — would otherwise leave the request, and the button, hanging forever.
+   */
+  timeoutMs?: number;
 }
 
 export class AbortedError extends Error {
@@ -92,6 +98,20 @@ export class AbortedError extends Error {
     this.name = "AbortedError";
   }
 }
+
+/** A read that has not answered in 20 seconds is not going to answer. */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * A movement that times out is not a movement that failed: the server may well have
+ * committed it after the client stopped listening, which is exactly what happened to a
+ * 42.50 ETB transfer during development. So a write waits far longer, and when it does
+ * give up the message says "we do not know" rather than "nothing happened".
+ */
+const WRITE_TIMEOUT_MS = 180_000;
+
+/** Uploads and downloads carry up to 8 MB of identity image, so they get longer. */
+const FILE_TIMEOUT_MS = 120_000;
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
   const url = new URL(path.startsWith("/") ? path : `/${path}`, API_ORIGIN);
@@ -118,7 +138,13 @@ async function send(path: string, opts: RequestOptions): Promise<Response> {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(opts.body);
   }
-  if (opts.signal) init.signal = opts.signal;
+  // The timeout is its own signal, joined with any the caller passed, so the two
+  // failure modes stay distinguishable in the catch below.
+  const isRead = (opts.method ?? "GET") === "GET";
+  const timeout = AbortSignal.timeout(
+    opts.timeoutMs ?? (isRead ? REQUEST_TIMEOUT_MS : WRITE_TIMEOUT_MS)
+  );
+  init.signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
 
   try {
     return await fetch(buildUrl(path, opts.query), init);
@@ -128,7 +154,7 @@ async function send(path: string, opts: RequestOptions): Promise<Response> {
       status: 0,
       code: "NETWORK_ERROR",
       message: "Network request failed",
-      details: null,
+      details: timeout.aborted ? { reason: "timeout", outcome: isRead ? "none" : "unknown" } : null,
     });
   }
 }
@@ -214,7 +240,11 @@ async function requestJson<T>(path: string, opts: RequestOptions = {}): Promise<
  * Authorization header attached, so a plain `<img src>` cannot be used.
  */
 async function requestBlob(path: string, opts: RequestOptions = {}): Promise<Blob> {
-  const { res, envelope } = await requestRaw(path, { accept: "image/jpeg", ...opts });
+  const { res, envelope } = await requestRaw(path, {
+    accept: "image/jpeg",
+    timeoutMs: FILE_TIMEOUT_MS,
+    ...opts,
+  });
   if (!res.ok) {
     throw errorFrom(
       res,
@@ -367,6 +397,7 @@ export async function downloadStatement(query: StatementQuery): Promise<Download
   const path = "/api/statements";
   const opts: RequestOptions = {
     query: { ...query },
+    timeoutMs: FILE_TIMEOUT_MS,
   };
   const { res, envelope } = await requestRaw(path, opts);
   const contentType = res.headers.get("content-type") ?? "";
@@ -430,6 +461,7 @@ export function uploadKycDocument(side: DocumentSide, file: File): Promise<KycDo
   return requestJson<KycDocumentUpload>("/api/kyc/documents", {
     method: "POST",
     form,
+    timeoutMs: FILE_TIMEOUT_MS,
   });
 }
 
