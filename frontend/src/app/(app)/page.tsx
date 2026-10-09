@@ -215,6 +215,17 @@ function RefreshControl({
   );
 }
 
+/**
+ * A day's spend that is not zero must never read as "0%": rounding 42.93 of
+ * 100,000 away is exactly the kind of figure that makes people doubt the rest.
+ */
+function percentUsed(ratio: number): string {
+  if (ratio <= 0) return "0";
+  const pct = ratio * 100;
+  if (pct < 0.1) return "<0.1";
+  return pct < 1 ? pct.toFixed(1) : String(Math.round(pct));
+}
+
 function DailyCapacity({ limits, tier }: { limits: LimitSummary; tier: number | null }) {
   const usedToday = ratioOf(limits.spentToday, limits.daily) ?? 0;
   const usedMonth = ratioOf(limits.spentThisMonth, limits.monthly) ?? 0;
@@ -242,7 +253,7 @@ function DailyCapacity({ limits, tier }: { limits: LimitSummary; tier: number | 
           <div className="h-2 w-full overflow-hidden rounded-full border border-line">
             <div
               className={`h-full rounded-full ${nearCap ? "bg-debit" : "bg-ink"}`}
-              style={{ width: `${Math.round(usedToday * 100)}%` }}
+              style={{ width: `${Math.min(100, usedToday * 100)}%` }}
               role="progressbar"
               aria-valuenow={Math.round(usedToday * 100)}
               aria-valuemin={0}
@@ -251,8 +262,8 @@ function DailyCapacity({ limits, tier }: { limits: LimitSummary; tier: number | 
             />
           </div>
           <p className="mt-2 flex flex-wrap justify-between gap-2 text-label text-ink-faint">
-            <span>{Math.round(usedToday * 100)}% of today's limit used</span>
-            <span>{Math.round(usedMonth * 100)}% of the monthly limit used</span>
+            <span>{percentUsed(usedToday)}% of today's limit used</span>
+            <span>{percentUsed(usedMonth)}% of the monthly limit used</span>
           </p>
         </div>
 

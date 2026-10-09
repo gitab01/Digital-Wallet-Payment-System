@@ -62,38 +62,42 @@ export function AccountCard({
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-2">
-        <Link
-          href={`/transfer?currency=${encodeURIComponent(account.currency)}`}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-label font-medium uppercase tracking-wide text-white transition-colors hover:bg-white hover:text-ink"
-        >
-          <Icon name="send" className="h-3.5 w-3.5" />
-          Send
-        </Link>
-        <Button size="sm" variant="secondary" onClick={onDeposit}>
-          Add money
-        </Button>
-        <button
-          type="button"
-          onClick={onWithdraw}
-          disabled={!canWithdraw}
-          title={
-            !allowsWithdrawal
-              ? "Your KYC tier does not allow withdrawals"
-              : withdrawalsFrozen
-                ? "Withdrawals are frozen on this profile"
-                : undefined
-          }
-          className="inline-flex h-9 shrink-0 items-center rounded-md px-2 text-label font-medium uppercase tracking-wide text-ink-muted underline-offset-4 hover:text-ink hover:underline disabled:text-ink-faint/60 disabled:no-underline"
-        >
-          Withdraw
-        </button>
-        <Link
-          href={`/statement?accountId=${account.id}`}
-          className="inline-flex h-9 shrink-0 items-center rounded-md px-2 text-label font-medium uppercase tracking-wide text-ink-muted underline-offset-4 hover:text-ink hover:underline"
-        >
-          Statement
-        </Link>
+      <div className="mt-5 space-y-2">
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/transfer?currency=${encodeURIComponent(account.currency)}`}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-label font-medium uppercase tracking-wide text-white transition-colors hover:bg-white hover:text-ink"
+          >
+            <Icon name="send" className="h-3.5 w-3.5" />
+            Send
+          </Link>
+          <Button size="sm" variant="secondary" onClick={onDeposit}>
+            Add money
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onWithdraw}
+            disabled={!canWithdraw}
+            title={
+              !allowsWithdrawal
+                ? "Your KYC tier does not allow withdrawals"
+                : withdrawalsFrozen
+                  ? "Withdrawals are frozen on this profile"
+                  : undefined
+            }
+            className="inline-flex h-9 shrink-0 items-center rounded-md px-2 text-label font-medium uppercase tracking-wide text-ink-muted underline-offset-4 hover:text-ink hover:underline disabled:text-ink-faint/60 disabled:no-underline"
+          >
+            Withdraw
+          </button>
+          <Link
+            href={`/statement?accountId=${account.id}`}
+            className="inline-flex h-9 shrink-0 items-center rounded-md px-2 text-label font-medium uppercase tracking-wide text-ink-muted underline-offset-4 hover:text-ink hover:underline"
+          >
+            Statement
+          </Link>
+        </div>
       </div>
     </article>
   );

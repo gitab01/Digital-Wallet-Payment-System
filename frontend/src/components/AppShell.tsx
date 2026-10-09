@@ -15,7 +15,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: IconName;
-  /** Six uppercase tabs do not fit 390px at full length, so phones get a short one. */
+  /** Six destinations share one phone tab bar, so the reviewer's gets a short word. */
   mobileLabel?: string;
 }
 
@@ -134,10 +134,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         {/*
-          Both class strings are written out literally because the scanner only
-          keeps what appears in source. Six tabs at 390px leave 65px per
-          destination, so the label gives up a pixel of size and the longest word
-          still lands on one line.
+          Both class strings are written out literally because the scanner only keeps
+          what appears in source: 320px split five ways leaves 64px per destination and
+          six leaves 53px, so the reviewer's extra tab costs a point of type. The labels
+          are sentence-case like the sidebar's, not uppercase -- a capital S is a pixel
+          wider than a small one, and STATEMENT is the word that decides the tab type.
         */}
         <ul className={isReviewer ? "grid grid-cols-6" : "grid grid-cols-5"}>
           {nav.map((item) => {
@@ -147,9 +148,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   href={item.href}
                   aria-current={active ? "page" : undefined}
-                  className={`relative flex flex-col items-center gap-1 px-0.5 py-2.5 text-center uppercase ${
-                    isReviewer ? "text-[0.625rem] leading-3 tracking-[0.02em]" : "text-label tracking-wide"
-                  } ${active ? "font-semibold text-ink" : "text-ink-faint"}`}
+                  className={`relative flex flex-col items-center gap-1 px-0.5 py-2.5 text-center ${
+                    isReviewer ? "text-[0.625rem]" : "text-label"
+                  } leading-3 ${active ? "font-semibold text-ink" : "text-ink-faint"}`}
                 >
                   {active ? (
                     <span aria-hidden="true" className="absolute inset-x-4 top-0 h-0.5 bg-ink" />

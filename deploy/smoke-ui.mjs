@@ -491,6 +491,30 @@ await shot('16-wallet-after');
 const amounts = await evaluate(`(document.body.innerText.match(/[0-9]{1,3}(?:,[0-9]{3})*\\.[0-9]{2}/g) || []).slice(0, 6).join(', ')`);
 console.log(`   amounts on the wallet screen: ${amounts}`);
 
+/* A wallet read that times out renders a red callout in place of the balances, and the
+   control count cannot tell that screen from a working one. The percentages are read
+   back here because a small day's spend is what used to round to a bare "0%". */
+const limitCopy = await evaluate(`(() => {
+  const text = (document.body.innerText || '').replace(/\\s+/g, ' ');
+  const grab = (suffix) => (text.match(new RegExp('(\\\\S+) of ' + suffix, 'i')) || [null, null])[1];
+  const spent = (text.match(/Spent today (\\d[\\d,]*\\.\\d\\d)/i) || [null, null])[1];
+  return JSON.stringify({
+    daily: grab("today'?s limit used"),
+    monthly: grab('the monthly limit used'),
+    spent,
+  });
+})()`);
+const limits = JSON.parse(limitCopy);
+console.log(`   limit usage as printed: ${limits.daily} of today, ${limits.monthly} of the month (spent ${limits.spent})`);
+if (await evaluate(`(document.body.innerText || '').includes('could not read your wallet')`)) {
+  console.log('   api calls:', JSON.stringify(apiCalls.slice(-6).map((c) => `${c.label} ${c.result || 'pending'}`)));
+  throw new Error('the wallet screen reported a failed read instead of balances');
+}
+if (!limits.daily || !limits.monthly) throw new Error('the wallet screen no longer prints its limit usage');
+if (limits.daily === '0%' && limits.spent && Number(limits.spent.replace(/,/g, '')) > 0) {
+  throw new Error(`spent ${limits.spent} today but the screen reads 0% of today's limit used`);
+}
+
 /* ----------------------------------------------------------------- phone */
 
 await viewport(390, 844);
@@ -505,6 +529,28 @@ for (const [name, path] of [
 ]) {
   await navigate(path);
   await shot(name);
+}
+
+/* The bottom tab bar splits 320 px five ways, and until now that width was only ever
+   photographed on the sign-in pages, which have no tabs at all. Clipping is checked per
+   label because an ellipsised word still fits inside the page. */
+await viewport(320, 568);
+console.log('\n[320x568] client');
+for (const [name, path] of [
+  ['26-tiny-wallet', '/'],
+  ['27-tiny-settings', '/settings'],
+]) {
+  await navigate(path);
+  await shot(name);
+  /* The anchor is a flex column and never overflows on its own; the label span inside it
+     is what an ellipsis eats, so that is the box worth measuring. */
+  const clipped = await evaluate(`[...document.querySelectorAll('nav li a span')].filter(s => !s.getAttribute('aria-hidden'))
+    .map(s => ({ text: s.innerText.trim(), need: s.scrollWidth, got: s.clientWidth }))
+    .filter(s => s.text && s.need > s.got + 1)`);
+  const widths = await evaluate(`[...document.querySelectorAll('nav li a span')].filter(s => !s.getAttribute('aria-hidden') && s.innerText.trim())
+    .map(s => s.innerText.trim() + '=' + s.scrollWidth).join(' ')`);
+  console.log(`   tabs: ${widths}`);
+  if (clipped.length) throw new Error(`tab label(s) clipped at 320px: ${JSON.stringify(clipped)}`);
 }
 
 /* ------------------------------------------------ identity documents, phone */
